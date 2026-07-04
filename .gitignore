@@ -1,5 +1,5 @@
-# Build output
-alternate-sh
+# Build output (root-level binary only, not cmd/alternate-sh/ source dir)
+/alternate-sh
 
 # Config (contains secrets)
 config.toml

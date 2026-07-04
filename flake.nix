@@ -24,7 +24,9 @@
 
             # Update this hash after any change to go.mod / go.sum:
             #   nix build 2>&1 | grep "got:"   →  copy the sha256 value
-            vendorHash = pkgs.lib.fakeHash;
+            vendorHash = "sha256-WLDKt+VzwnmqiYioSoPRiK9ejJl4TxUIObdxuW7PVE0=";
+
+            subPackages = [ "cmd/alternate-sh" ];
 
             # Embed the migration files (go:embed requires them at build time).
             # buildGoModule copies src to a temp dir; the embed path resolves fine.
