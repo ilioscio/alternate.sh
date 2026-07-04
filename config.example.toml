@@ -1,0 +1,26 @@
+[server]
+hostname = "mynode.example.com"
+motd     = "Welcome to alternate.sh\nBe excellent to each other."
+
+[ssh]
+port     = 2222
+host_key = "/etc/alternate-sh/ssh_host_ed25519_key"
+
+[web]
+port     = 8080
+tls_cert = ""
+tls_key  = ""
+
+[database]
+dsn = "postgres://alternateuser:pass@localhost/alternatedb?sslmode=disable"
+
+[federation]
+assp_port = 4119
+nntp_port = 119
+smtp_port = 25
+enabled   = false
+
+[limits]
+max_users    = 500
+mail_per_hour = 50
+news_per_day  = 20

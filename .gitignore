@@ -1,0 +1,19 @@
+# Build output
+alternate-sh
+
+# Config (contains secrets)
+config.toml
+
+# Nix
+result
+result-*
+.direnv/
+
+# Go
+vendor/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
