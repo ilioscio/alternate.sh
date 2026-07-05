@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-phosphor-green">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>alternate.sh</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.3.0/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.8.0/lib/addon-fit.js"></script>
+<style>
+/* ── Reset & base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: 'Share Tech Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--fg);
+  transition: background 0.2s, color 0.2s;
+  overflow: hidden;
+}
+
+/* ── Themes ───────────────────────────────────────────────────────────────── */
+.theme-phosphor-green {
+  --bg:           #050a05;
+  --fg:           #33ff33;
+  --fg-dim:       #1a7a1a;
+  --fg-bright:    #99ff99;
+  --border:       rgba(51, 255, 51, 0.35);
+  --border-dim:   rgba(51, 255, 51, 0.12);
+  --input-bg:     rgba(51, 255, 51, 0.05);
+  --glow-box:     0 0 6px rgba(51, 255, 51, 0.5), 0 0 24px rgba(51, 255, 51, 0.2);
+  --glow-text:    0 0 8px rgba(51, 255, 51, 0.6);
+  --scanline-a:   0.07;
+  --cursor-color: #33ff33;
+}
+.theme-phosphor-amber {
+  --bg:           #0d0800;
+  --fg:           #ffb800;
+  --fg-dim:       #8c6500;
+  --fg-bright:    #ffd966;
+  --border:       rgba(255, 184, 0, 0.35);
+  --border-dim:   rgba(255, 184, 0, 0.12);
+  --input-bg:     rgba(255, 184, 0, 0.05);
+  --glow-box:     0 0 6px rgba(255, 184, 0, 0.5), 0 0 24px rgba(255, 184, 0, 0.2);
+  --glow-text:    0 0 8px rgba(255, 184, 0, 0.6);
+  --scanline-a:   0.07;
+  --cursor-color: #ffb800;
+}
+.theme-white-paper {
+  --bg:           #f0ebe0;
+  --fg:           #1a1a1a;
+  --fg-dim:       #888880;
+  --fg-bright:    #000000;
+  --border:       rgba(0, 0, 0, 0.25);
+  --border-dim:   rgba(0, 0, 0, 0.10);
+  --input-bg:     rgba(0, 0, 0, 0.04);
+  --glow-box:     none;
+  --glow-text:    none;
+  --scanline-a:   0;
+  --cursor-color: #1a1a1a;
+}
+.theme-blue-steel {
+  --bg:           #000814;
+  --fg:           #4488ff;
+  --fg-dim:       #1a3a8c;
+  --fg-bright:    #88aaff;
+  --border:       rgba(68, 136, 255, 0.35);
+  --border-dim:   rgba(68, 136, 255, 0.12);
+  --input-bg:     rgba(68, 136, 255, 0.05);
+  --glow-box:     0 0 6px rgba(68, 136, 255, 0.5), 0 0 24px rgba(68, 136, 255, 0.2);
+  --glow-text:    0 0 8px rgba(68, 136, 255, 0.6);
+  --scanline-a:   0.06;
+  --cursor-color: #4488ff;
+}
+
+/* ── Login screen ─────────────────────────────────────────────────────────── */
+#login-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  padding: 1rem;
+}
+
+#login-dialog {
+  width: 100%;
+  max-width: 420px;
+  border: 1px solid var(--border);
+  box-shadow: var(--glow-box);
+  background: var(--bg);
+}
+
+.dlg-header {
+  padding: 1rem 1.5rem 0.75rem;
+  border-bottom: 1px solid var(--border-dim);
+  text-align: center;
+}
+.dlg-header .brand {
+  font-size: 1.25rem;
+  letter-spacing: 0.15em;
+  text-shadow: var(--glow-text);
+}
+.dlg-header .subtitle {
+  font-size: 0.75rem;
+  color: var(--fg-dim);
+  margin-top: 0.25rem;
+  letter-spacing: 0.05em;
+}
+
+.dlg-body {
+  padding: 1.25rem 1.5rem;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.field label {
+  width: 6rem;
+  flex-shrink: 0;
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+}
+.field input[type=text],
+.field input[type=password] {
+  flex: 1;
+  background: var(--input-bg);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.25rem 0.4rem;
+  outline: none;
+  caret-color: var(--fg);
+}
+.field input:focus {
+  border-bottom-color: var(--fg);
+  box-shadow: 0 1px 0 var(--fg);
+}
+
+#login-error {
+  font-size: 0.75rem;
+  color: var(--fg-dim);
+  min-height: 1.2em;
+  margin-bottom: 0.5rem;
+  padding-left: 6rem;
+}
+#login-error:not(:empty)::before {
+  content: '! ';
+}
+
+.dlg-submit {
+  text-align: center;
+  margin-top: 0.5rem;
+}
+.dlg-submit button {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.875rem;
+  padding: 0.35rem 2rem;
+  cursor: pointer;
+  letter-spacing: 0.1em;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.dlg-submit button:hover {
+  border-color: var(--fg);
+  box-shadow: var(--glow-box);
+}
+.dlg-submit button:active { opacity: 0.7; }
+.dlg-submit button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dlg-divider {
+  border: none;
+  border-top: 1px solid var(--border-dim);
+  margin: 0;
+}
+
+.dlg-prefs {
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  align-items: center;
+}
+
+.pref-label {
+  font-size: 0.7rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.05em;
+}
+
+.theme-radios {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.theme-radios label {
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--fg-dim);
+}
+.theme-radios label:has(input:checked) {
+  color: var(--fg);
+}
+.theme-radios input[type=radio] {
+  accent-color: var(--fg);
+}
+
+.crt-check label {
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--fg-dim);
+}
+.crt-check input[type=checkbox] {
+  accent-color: var(--fg);
+}
+
+/* ── Terminal screen ──────────────────────────────────────────────────────── */
+#terminal-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+#statusbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0.75rem;
+  border-bottom: 1px solid var(--border-dim);
+  font-size: 0.75rem;
+  background: var(--bg);
+}
+
+#sb-brand {
+  color: var(--fg);
+  letter-spacing: 0.1em;
+  text-shadow: var(--glow-text);
+  margin-right: 0.25rem;
+}
+.sb-sep { color: var(--fg-dim); }
+#sb-user { color: var(--fg-dim); }
+
+#sb-theme {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-dim);
+  color: var(--fg-dim);
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  outline: none;
+  padding: 0 0.1rem;
+}
+#sb-theme:focus { border-bottom-color: var(--fg); }
+
+#sb-crt-label {
+  cursor: pointer;
+  color: var(--fg-dim);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+#sb-crt-label input { accent-color: var(--fg); }
+
+.sb-spacer { flex: 1; }
+
+#sb-disconnect {
+  background: none;
+  border: 1px solid var(--border-dim);
+  color: var(--fg-dim);
+  font-family: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0.15rem 0.6rem;
+  letter-spacing: 0.05em;
+}
+#sb-disconnect:hover {
+  border-color: var(--fg);
+  color: var(--fg);
+}
+
+#terminal-wrapper {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  transition: border-radius 0.3s, box-shadow 0.3s;
+}
+
+#terminal {
+  width: 100%;
+  height: 100%;
+}
+/* xterm canvas needs full height */
+#terminal .xterm { height: 100%; }
+#terminal .xterm-viewport { overflow-y: hidden !important; }
+
+/* CRT scanline overlay — sits on top of canvas, pointer-events: none */
+#crt-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.3s;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 3px,
+    rgba(0, 0, 0, 0.12) 3px,
+    rgba(0, 0, 0, 0.12) 4px
+  );
+}
+
+/* ── CRT mode ─────────────────────────────────────────────────────────────── */
+.crt-on #terminal-wrapper {
+  border-radius: 10px 10px 0 0;
+  box-shadow: var(--glow-box), inset 0 0 60px rgba(0,0,0,0.35);
+}
+.crt-on #crt-overlay {
+  opacity: 1;
+}
+@keyframes crt-flicker {
+  0%   { opacity: 1; }
+  48%  { opacity: 0.985; }
+  50%  { opacity: 0.99; }
+  52%  { opacity: 0.985; }
+  100% { opacity: 1; }
+}
+.crt-on #terminal-wrapper {
+  animation: crt-flicker 8s infinite;
+}
+
+/* ── Utility ─────────────────────────────────────────────────────────────── */
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- ── Login screen ──────────────────────────────────────────────────────── -->
+<div id="login-screen">
+  <div id="login-dialog">
+    <div class="dlg-header">
+      <div class="brand">alternate.sh</div>
+      <div class="subtitle">an alternate history of the net</div>
+    </div>
+    <form class="dlg-body" id="login-form" autocomplete="on">
+      <div class="field">
+        <label for="inp-user">login:</label>
+        <input type="text" id="inp-user" name="username" autocomplete="username" spellcheck="false" autofocus>
+      </div>
+      <div class="field">
+        <label for="inp-pass">password:</label>
+        <input type="password" id="inp-pass" name="password" autocomplete="current-password">
+      </div>
+      <div id="login-error" aria-live="polite"></div>
+      <div class="dlg-submit">
+        <button type="submit" id="login-btn">[ connect ]</button>
+      </div>
+    </form>
+    <hr class="dlg-divider">
+    <div class="dlg-prefs">
+      <span class="pref-label">theme:</span>
+      <div class="theme-radios" id="login-theme-radios">
+        <label><input type="radio" name="theme" value="phosphor-green"> green</label>
+        <label><input type="radio" name="theme" value="phosphor-amber"> amber</label>
+        <label><input type="radio" name="theme" value="white-paper"> paper</label>
+        <label><input type="radio" name="theme" value="blue-steel"> blue</label>
+      </div>
+      <div class="crt-check">
+        <label><input type="checkbox" id="login-crt"> CRT effects</label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Terminal screen ───────────────────────────────────────────────────── -->
+<div id="terminal-screen" hidden>
+  <div id="statusbar">
+    <span id="sb-brand">alternate.sh</span>
+    <span class="sb-sep">·</span>
+    <span id="sb-user"></span>
+    <span class="sb-spacer"></span>
+    <select id="sb-theme" aria-label="Theme">
+      <option value="phosphor-green">green</option>
+      <option value="phosphor-amber">amber</option>
+      <option value="white-paper">paper</option>
+      <option value="blue-steel">blue</option>
+    </select>
+    <label id="sb-crt-label" title="CRT effects">
+      <input type="checkbox" id="sb-crt"> crt
+    </label>
+    <button id="sb-disconnect">[ disconnect ]</button>
+  </div>
+  <div id="terminal-wrapper">
+    <div id="terminal"></div>
+    <div id="crt-overlay"></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ── xterm.js themes ──────────────────────────────────────────────────────────
+const xtermThemes = {
+  'phosphor-green': {
+    background:          '#050a05',
+    foreground:          '#33ff33',
+    cursor:              '#33ff33',
+    cursorAccent:        '#050a05',
+    selectionBackground: 'rgba(51,255,51,0.25)',
+    black:    '#050a05', red:          '#1a7a1a',
+    green:    '#33ff33', yellow:       '#80ff80',
+    blue:     '#0d3d0d', magenta:      '#1a7a1a',
+    cyan:     '#33cc33', white:        '#80ff80',
+    brightBlack:   '#1a7a1a', brightRed:    '#33ff33',
+    brightGreen:   '#80ff80', brightYellow: '#ccffcc',
+    brightBlue:    '#33ff33', brightMagenta:'#33ff33',
+    brightCyan:    '#80ff80', brightWhite:  '#ccffcc',
+  },
+  'phosphor-amber': {
+    background:          '#0d0800',
+    foreground:          '#ffb800',
+    cursor:              '#ffb800',
+    cursorAccent:        '#0d0800',
+    selectionBackground: 'rgba(255,184,0,0.25)',
+    black:    '#0d0800', red:          '#8c6500',
+    green:    '#ffb800', yellow:       '#ffd966',
+    blue:     '#402800', magenta:      '#8c6500',
+    cyan:     '#cc9400', white:        '#ffd966',
+    brightBlack:   '#8c6500', brightRed:    '#ffb800',
+    brightGreen:   '#ffd966', brightYellow: '#fff0b3',
+    brightBlue:    '#ffb800', brightMagenta:'#ffb800',
+    brightCyan:    '#ffd966', brightWhite:  '#fff0b3',
+  },
+  'white-paper': {
+    background:          '#f0ebe0',
+    foreground:          '#1a1a1a',
+    cursor:              '#1a1a1a',
+    cursorAccent:        '#f0ebe0',
+    selectionBackground: 'rgba(0,0,0,0.15)',
+    black:    '#1a1a1a', red:          '#8b0000',
+    green:    '#006400', yellow:       '#8b8b00',
+    blue:     '#00008b', magenta:      '#8b008b',
+    cyan:     '#008b8b', white:        '#666666',
+    brightBlack:   '#333333', brightRed:    '#cc0000',
+    brightGreen:   '#009900', brightYellow: '#cccc00',
+    brightBlue:    '#0000cc', brightMagenta:'#cc00cc',
+    brightCyan:    '#00cccc', brightWhite:  '#1a1a1a',
+  },
+  'blue-steel': {
+    background:          '#000814',
+    foreground:          '#4488ff',
+    cursor:              '#4488ff',
+    cursorAccent:        '#000814',
+    selectionBackground: 'rgba(68,136,255,0.25)',
+    black:    '#000814', red:          '#1a3a8c',
+    green:    '#4488ff', yellow:       '#88aaff',
+    blue:     '#0a1f6d', magenta:      '#1a3a8c',
+    cyan:     '#3366cc', white:        '#88aaff',
+    brightBlack:   '#1a3a8c', brightRed:    '#4488ff',
+    brightGreen:   '#88aaff', brightYellow: '#ccdaff',
+    brightBlue:    '#4488ff', brightMagenta:'#4488ff',
+    brightCyan:    '#88aaff', brightWhite:  '#ccdaff',
+  },
+};
+
+// ── State ────────────────────────────────────────────────────────────────────
+let currentTheme = localStorage.getItem('as-theme') || 'phosphor-green';
+let crtEnabled   = localStorage.getItem('as-crt') === '1';
+let authToken    = localStorage.getItem('as-token');
+let authUser     = localStorage.getItem('as-user');
+
+let term    = null;
+let fitAddon = null;
+let activeWS = null;
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const loginScreen     = document.getElementById('login-screen');
+const loginForm       = document.getElementById('login-form');
+const inpUser         = document.getElementById('inp-user');
+const inpPass         = document.getElementById('inp-pass');
+const loginError      = document.getElementById('login-error');
+const loginBtn        = document.getElementById('login-btn');
+const loginCrt        = document.getElementById('login-crt');
+const loginThemeRadios = document.getElementById('login-theme-radios');
+
+const termScreen  = document.getElementById('terminal-screen');
+const sbUser      = document.getElementById('sb-user');
+const sbTheme     = document.getElementById('sb-theme');
+const sbCrt       = document.getElementById('sb-crt');
+const sbDisconnect = document.getElementById('sb-disconnect');
+const termEl      = document.getElementById('terminal');
+const crtOverlay  = document.getElementById('crt-overlay');
+
+// ── Theme & CRT ──────────────────────────────────────────────────────────────
+function applyTheme(t) {
+  const html = document.documentElement;
+  html.className = html.className.replace(/\btheme-\S+/g, '');
+  html.classList.add('theme-' + t);
+  currentTheme = t;
+  localStorage.setItem('as-theme', t);
+  // Sync controls
+  document.querySelectorAll('input[name=theme]').forEach(r => {
+    r.checked = (r.value === t);
+  });
+  sbTheme.value = t;
+  // Update live terminal if open
+  if (term) term.options.theme = xtermThemes[t];
+}
+
+function applyCRT(on) {
+  crtEnabled = on;
+  localStorage.setItem('as-crt', on ? '1' : '0');
+  document.documentElement.classList.toggle('crt-on', on);
+  loginCrt.checked = on;
+  sbCrt.checked    = on;
+}
+
+// ── Login/logout screens ─────────────────────────────────────────────────────
+function showLogin() {
+  termScreen.hidden = true;
+  loginScreen.hidden = false;
+  inpUser.value = '';
+  inpPass.value = '';
+  loginError.textContent = '';
+  loginBtn.disabled = false;
+  inpUser.focus();
+  if (term) { term.dispose(); term = null; }
+}
+
+function showTerminal(username) {
+  loginScreen.hidden = true;
+  termScreen.hidden  = false;
+  sbUser.textContent = username;
+}
+
+// ── Init controls ────────────────────────────────────────────────────────────
+applyTheme(currentTheme);
+applyCRT(crtEnabled);
+
+loginThemeRadios.addEventListener('change', e => {
+  if (e.target.name === 'theme') applyTheme(e.target.value);
+});
+loginCrt.addEventListener('change', () => applyCRT(loginCrt.checked));
+sbTheme.addEventListener('change', () => applyTheme(sbTheme.value));
+sbCrt.addEventListener('change',   () => applyCRT(sbCrt.checked));
+
+// ── Login flow ───────────────────────────────────────────────────────────────
+loginForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  loginError.textContent = '';
+  loginBtn.disabled = true;
+
+  try {
+    const res = await fetch('/api/login', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({
+        username: inpUser.value.trim(),
+        password: inpPass.value,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      loginError.textContent = body.error || (res.status === 401
+        ? 'invalid credentials'
+        : 'server error — try again');
+      loginBtn.disabled = false;
+      inpPass.focus();
+      return;
+    }
+
+    const data = await res.json();
+    authToken = data.token;
+    authUser  = data.username;
+    localStorage.setItem('as-token', authToken);
+    localStorage.setItem('as-user',  authUser);
+
+    showTerminal(authUser);
+    connectWS(authToken);
+
+  } catch (err) {
+    loginError.textContent = 'network error — check your connection';
+    loginBtn.disabled = false;
+  }
+});
+
+// ── WebSocket + xterm.js ─────────────────────────────────────────────────────
+function connectWS(token) {
+  if (activeWS) activeWS.close();
+
+  term = new Terminal({
+    fontFamily:       '"Share Tech Mono","Fira Code","Courier New",monospace',
+    fontSize:         14,
+    lineHeight:       1.2,
+    theme:            xtermThemes[currentTheme],
+    cursorBlink:      true,
+    cursorStyle:      'block',
+    scrollback:       5000,
+    convertEol:       false,
+    allowProposedApi: true,
+  });
+
+  fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(termEl);
+  fitAddon.fit();
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(token)}`);
+  ws.binaryType = 'arraybuffer';
+  activeWS = ws;
+
+  ws.onopen = () => {
+    sendResize(ws);
+    term.onData(data => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    });
+    term.onResize(() => sendResize(ws));
+  };
+
+  ws.onmessage = e => {
+    term.write(new Uint8Array(e.data));
+  };
+
+  ws.onclose = e => {
+    if (e.code !== 1000) {
+      // Unexpected close
+      term.write('\r\n\x1b[2m(disconnected)\x1b[0m\r\n');
+    }
+    activeWS = null;
+  };
+
+  ws.onerror = () => {
+    if (ws.readyState !== WebSocket.OPEN) {
+      localStorage.removeItem('as-token');
+      localStorage.removeItem('as-user');
+      showLogin();
+      loginError.textContent = 'connection failed — please log in again';
+    }
+  };
+
+  // Resize observer
+  const ro = new ResizeObserver(() => {
+    if (fitAddon) fitAddon.fit();
+  });
+  ro.observe(termEl);
+}
+
+function sendResize(ws) {
+  if (!term || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({type: 'resize', cols: term.cols, rows: term.rows}));
+}
+
+// ── Disconnect ───────────────────────────────────────────────────────────────
+sbDisconnect.addEventListener('click', async () => {
+  const t = authToken;
+  authToken = null;
+  authUser  = null;
+  localStorage.removeItem('as-token');
+  localStorage.removeItem('as-user');
+  if (activeWS) { activeWS.close(1000); activeWS = null; }
+  // Fire-and-forget logout
+  if (t) fetch('/api/logout', {method:'DELETE', headers:{'X-Token': t}}).catch(() => {});
+  showLogin();
+});
+
+// ── Auto-reconnect on load if token saved ───────────────────────────────────
+if (authToken && authUser) {
+  showTerminal(authUser);
+  connectWS(authToken);
+} else {
+  showLogin();
+}
+</script>
+</body>
+</html>

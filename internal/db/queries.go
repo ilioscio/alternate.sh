@@ -315,3 +315,36 @@ func GetPublicPage(ctx context.Context, pool *pgxpool.Pool, username string) (st
 	}
 	return u.PublicPage, nil
 }
+
+// CreateSession inserts a new session for userID and returns the token UUID string.
+func CreateSession(ctx context.Context, pool *pgxpool.Pool, userID string) (string, error) {
+	var token string
+	err := pool.QueryRow(ctx,
+		`INSERT INTO sessions (user_id) VALUES ($1) RETURNING token::text`, userID,
+	).Scan(&token)
+	return token, err
+}
+
+// GetSessionUser looks up the user for a valid, non-expired session token.
+// Expired sessions are deleted as a side effect.
+func GetSessionUser(ctx context.Context, pool *pgxpool.Pool, token string) (*User, error) {
+	pool.Exec(ctx, `DELETE FROM sessions WHERE expires_at < NOW()`)
+
+	var userID string
+	err := pool.QueryRow(ctx,
+		`SELECT user_id::text FROM sessions WHERE token = $1 AND expires_at > NOW()`, token,
+	).Scan(&userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return GetUserByID(ctx, pool, userID)
+}
+
+// DeleteSession removes a session by its token string.
+func DeleteSession(ctx context.Context, pool *pgxpool.Pool, token string) error {
+	_, err := pool.Exec(ctx, `DELETE FROM sessions WHERE token = $1`, token)
+	return err
+}

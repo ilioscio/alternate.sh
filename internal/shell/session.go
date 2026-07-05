@@ -118,3 +118,11 @@ func (s *Session) Register() {
 func (s *Session) Unregister() {
 	s.hub.Unregister(s.ID)
 }
+
+// Resize updates the terminal dimensions. Called from WebSocket resize messages.
+func (s *Session) Resize(cols, rows int) {
+	s.mu.Lock()
+	s.cols = cols
+	s.rows = rows
+	s.mu.Unlock()
+}
