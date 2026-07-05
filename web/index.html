@@ -74,6 +74,19 @@ html, body {
   --scanline-a:   0.06;
   --cursor-color: #4488ff;
 }
+.theme-white-black {
+  --bg:           #000000;
+  --fg:           #ffffff;
+  --fg-dim:       #999999;
+  --fg-bright:    #ffffff;
+  --border:       rgba(255, 255, 255, 0.3);
+  --border-dim:   rgba(255, 255, 255, 0.12);
+  --input-bg:     rgba(255, 255, 255, 0.05);
+  --glow-box:     none;
+  --glow-text:    none;
+  --scanline-a:   0.10;
+  --cursor-color: #ffffff;
+}
 
 /* ── Login screen ─────────────────────────────────────────────────────────── */
 #login-screen {
@@ -312,20 +325,19 @@ html, body {
 #terminal .xterm { height: 100%; }
 #terminal .xterm-viewport { overflow-y: hidden !important; }
 
-/* CRT scanline overlay — sits on top of canvas, pointer-events: none */
-#crt-overlay {
-  position: absolute;
+/* CRT scanline overlay — fixed position puts it above all canvas layers */
+.crt-on body::after {
+  content: '';
+  position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 10;
-  opacity: 0;
-  transition: opacity 0.3s;
+  z-index: 9999;
   background: repeating-linear-gradient(
     to bottom,
     transparent 0px,
     transparent 3px,
-    rgba(0, 0, 0, 0.12) 3px,
-    rgba(0, 0, 0, 0.12) 4px
+    rgba(0, 0, 0, var(--scanline-a, 0.07)) 3px,
+    rgba(0, 0, 0, var(--scanline-a, 0.07)) 4px
   );
 }
 
@@ -333,9 +345,6 @@ html, body {
 .crt-on #terminal-wrapper {
   border-radius: 10px 10px 0 0;
   box-shadow: var(--glow-box), inset 0 0 60px rgba(0,0,0,0.35);
-}
-.crt-on #crt-overlay {
-  opacity: 1;
 }
 @keyframes crt-flicker {
   0%   { opacity: 1; }
@@ -383,6 +392,7 @@ html, body {
         <label><input type="radio" name="theme" value="phosphor-amber"> amber</label>
         <label><input type="radio" name="theme" value="white-paper"> paper</label>
         <label><input type="radio" name="theme" value="blue-steel"> blue</label>
+        <label><input type="radio" name="theme" value="white-black"> mono</label>
       </div>
       <div class="crt-check">
         <label><input type="checkbox" id="login-crt"> CRT effects</label>
@@ -403,6 +413,7 @@ html, body {
       <option value="phosphor-amber">amber</option>
       <option value="white-paper">paper</option>
       <option value="blue-steel">blue</option>
+      <option value="white-black">mono</option>
     </select>
     <label id="sb-crt-label" title="CRT effects">
       <input type="checkbox" id="sb-crt"> crt
@@ -411,7 +422,6 @@ html, body {
   </div>
   <div id="terminal-wrapper">
     <div id="terminal"></div>
-    <div id="crt-overlay"></div>
   </div>
 </div>
 
@@ -480,6 +490,21 @@ const xtermThemes = {
     brightBlue:    '#4488ff', brightMagenta:'#4488ff',
     brightCyan:    '#88aaff', brightWhite:  '#ccdaff',
   },
+  'white-black': {
+    background:          '#000000',
+    foreground:          '#ffffff',
+    cursor:              '#ffffff',
+    cursorAccent:        '#000000',
+    selectionBackground: 'rgba(255,255,255,0.25)',
+    black:    '#000000', red:          '#cc0000',
+    green:    '#00cc00', yellow:       '#cccc00',
+    blue:     '#0000cc', magenta:      '#cc00cc',
+    cyan:     '#00cccc', white:        '#cccccc',
+    brightBlack:   '#555555', brightRed:    '#ff5555',
+    brightGreen:   '#55ff55', brightYellow: '#ffff55',
+    brightBlue:    '#5555ff', brightMagenta:'#ff55ff',
+    brightCyan:    '#55ffff', brightWhite:  '#ffffff',
+  },
 };
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -508,7 +533,6 @@ const sbTheme     = document.getElementById('sb-theme');
 const sbCrt       = document.getElementById('sb-crt');
 const sbDisconnect = document.getElementById('sb-disconnect');
 const termEl      = document.getElementById('terminal');
-const crtOverlay  = document.getElementById('crt-overlay');
 
 // ── Theme & CRT ──────────────────────────────────────────────────────────────
 function applyTheme(t) {
