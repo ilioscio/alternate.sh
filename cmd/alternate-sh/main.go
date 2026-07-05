@@ -44,6 +44,18 @@ func main() {
 	adduser.MarkFlagRequired("username")
 	root.AddCommand(adduser)
 
+	setpw := &cobra.Command{
+		Use:   "setpassword",
+		Short: "Set a user's password (admin operation, no old password required)",
+		RunE:  runSetpassword,
+	}
+	setpw.Flags().String("config", "config.toml", "path to config file")
+	setpw.Flags().String("username", "", "username")
+	setpw.Flags().String("password", "", "new password (min 8 chars)")
+	setpw.MarkFlagRequired("username")
+	setpw.MarkFlagRequired("password")
+	root.AddCommand(setpw)
+
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -139,6 +151,44 @@ func runAdduser(cmd *cobra.Command, _ []string) error {
 			fmt.Printf("  pubkey added: %s...\n", key[:min(40, len(key))])
 		}
 	}
+	return nil
+}
+
+func runSetpassword(cmd *cobra.Command, _ []string) error {
+	cfgPath, _ := cmd.Flags().GetString("config")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+
+	ctx := context.Background()
+	pool, err := db.Connect(ctx, cfg.Database.DSN)
+	if err != nil {
+		return fmt.Errorf("database: %w", err)
+	}
+	defer pool.Close()
+
+	username, _ := cmd.Flags().GetString("username")
+	password, _ := cmd.Flags().GetString("password")
+
+	if len(password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+
+	u, err := db.GetUserByUsername(ctx, pool, username)
+	if err != nil {
+		return fmt.Errorf("user not found: %w", err)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hashing password: %w", err)
+	}
+
+	if err := db.UpdatePassword(ctx, pool, u.ID, string(hash)); err != nil {
+		return fmt.Errorf("updating password: %w", err)
+	}
+	fmt.Printf("password updated for %s\n", username)
 	return nil
 }
 
