@@ -633,7 +633,7 @@ function connectWS(token) {
   ws.onopen = () => {
     sendResize(ws);
     term.onData(data => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+      if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
     });
     term.onResize(() => sendResize(ws));
   };
