@@ -29,6 +29,7 @@ type User struct {
 	VacationMessage string
 	HushLogin       bool
 	Admin           bool
+	Calendar        string
 	CreatedAt       time.Time
 	LastLogin       *time.Time
 }
@@ -53,7 +54,7 @@ type LoginRecord struct {
 const userColumns = `
 	id, username, display_name, password_hash, office, home_phone,
 	plan, project, signature, public_page, mesg_on, vacation,
-	vacation_message, hush_login, admin, created_at, last_login`
+	vacation_message, hush_login, admin, calendar, created_at, last_login`
 
 func scanUser(row pgx.Row) (*User, error) {
 	u := &User{}
@@ -61,7 +62,7 @@ func scanUser(row pgx.Row) (*User, error) {
 		&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash,
 		&u.Office, &u.HomePhone, &u.Plan, &u.Project,
 		&u.Signature, &u.PublicPage, &u.MesgOn, &u.Vacation,
-		&u.VacationMessage, &u.HushLogin, &u.Admin, &u.CreatedAt, &u.LastLogin,
+		&u.VacationMessage, &u.HushLogin, &u.Admin, &u.Calendar, &u.CreatedAt, &u.LastLogin,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -106,6 +107,11 @@ func UpdateProject(ctx context.Context, pool *pgxpool.Pool, userID, project stri
 
 func UpdatePublicPage(ctx context.Context, pool *pgxpool.Pool, userID, page string) error {
 	_, err := pool.Exec(ctx, `UPDATE users SET public_page = $1 WHERE id = $2`, page, userID)
+	return err
+}
+
+func UpdateCalendar(ctx context.Context, pool *pgxpool.Pool, userID, calendar string) error {
+	_, err := pool.Exec(ctx, `UPDATE users SET calendar = $1 WHERE id = $2`, calendar, userID)
 	return err
 }
 

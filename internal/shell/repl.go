@@ -32,6 +32,7 @@ func Run(s *Session) {
 		printMOTD(s)
 		s.Println("")
 		printMsgsHint(s)
+		printMailHint(s)
 	}
 	cmdFortune(s, nil)
 	s.Println("")
@@ -99,6 +100,14 @@ func printMsgsHint(s *Session) {
 		return
 	}
 	s.Printf("  [%d new system message(s) — type 'msgs' to read]\r\n\r\n", n)
+}
+
+func printMailHint(s *Session) {
+	n, err := db.CountUnreadMail(s.ctx, s.db, s.User.ID)
+	if err != nil || n == 0 {
+		return
+	}
+	s.Printf("  [You have %d unread mail message(s) — type 'mail' to read]\r\n\r\n", n)
 }
 
 func buildPrompt(s *Session) string {
