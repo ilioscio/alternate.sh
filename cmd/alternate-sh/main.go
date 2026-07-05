@@ -37,11 +37,11 @@ func main() {
 	}
 	adduser.Flags().String("config", "config.toml", "path to config file")
 	adduser.Flags().String("username", "", "username")
-	adduser.Flags().String("password", "", "password")
+	adduser.Flags().String("password", "", "password (min 8 chars)")
 	adduser.Flags().String("name", "", "display name")
+	adduser.Flags().StringArray("pubkey", nil, "SSH public key(s) to authorize (can repeat)")
 	adduser.Flags().Bool("admin", false, "grant admin privileges")
 	adduser.MarkFlagRequired("username")
-	adduser.MarkFlagRequired("password")
 	root.AddCommand(adduser)
 
 	if err := root.Execute(); err != nil {
@@ -107,18 +107,22 @@ func runAdduser(cmd *cobra.Command, _ []string) error {
 	username, _ := cmd.Flags().GetString("username")
 	password, _ := cmd.Flags().GetString("password")
 	displayName, _ := cmd.Flags().GetString("name")
+	pubkeys, _ := cmd.Flags().GetStringArray("pubkey")
 	admin, _ := cmd.Flags().GetBool("admin")
 
-	if len(password) < 8 {
-		return fmt.Errorf("password must be at least 8 characters")
+	var hash string
+	if password != "" {
+		if len(password) < 8 {
+			return fmt.Errorf("password must be at least 8 characters")
+		}
+		h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("hashing password: %w", err)
+		}
+		hash = string(h)
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("hashing password: %w", err)
-	}
-
-	u, err := db.CreateUser(ctx, pool, username, string(hash), displayName, admin)
+	u, err := db.CreateUser(ctx, pool, username, hash, displayName, admin)
 	if err != nil {
 		return fmt.Errorf("creating user: %w", err)
 	}
@@ -127,5 +131,20 @@ func runAdduser(cmd *cobra.Command, _ []string) error {
 	if admin {
 		fmt.Println("  [admin]")
 	}
+
+	for _, key := range pubkeys {
+		if err := db.AddSSHKey(ctx, pool, u.ID, key); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not add pubkey: %v\n", err)
+		} else {
+			fmt.Printf("  pubkey added: %s...\n", key[:min(40, len(key))])
+		}
+	}
 	return nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

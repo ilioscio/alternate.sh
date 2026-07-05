@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -130,6 +131,23 @@ func UpdateVacation(ctx context.Context, pool *pgxpool.Pool, userID string, on b
 	_, err := pool.Exec(ctx,
 		`UPDATE users SET vacation = $1, vacation_message = $2 WHERE id = $3`,
 		on, msg, userID,
+	)
+	return err
+}
+
+func AddSSHKey(ctx context.Context, pool *pgxpool.Pool, userID, keyData string) error {
+	parts := strings.Fields(keyData)
+	if len(parts) < 2 {
+		return fmt.Errorf("invalid public key format")
+	}
+	keyType := parts[0]
+	comment := ""
+	if len(parts) > 2 {
+		comment = strings.Join(parts[2:], " ")
+	}
+	_, err := pool.Exec(ctx,
+		`INSERT INTO ssh_keys (user_id, key_type, key_data, comment) VALUES ($1, $2, $3, $4)`,
+		userID, keyType, keyData, comment,
 	)
 	return err
 }

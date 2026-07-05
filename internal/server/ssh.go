@@ -39,20 +39,27 @@ func NewSSH(cfg *config.Config, pool *pgxpool.Pool, hub *presence.Hub) *SSHServe
 		},
 
 		PublicKeyHandler: func(ctx gossh.Context, key gossh.PublicKey) bool {
+			fmt.Printf("[pubkey] user=%q offered key type=%s\n", ctx.User(), key.Type())
 			u, err := db.GetUserByUsername(ctx, pool, ctx.User())
 			if err != nil {
+				fmt.Printf("[pubkey] user lookup failed: %v\n", err)
 				return false
 			}
 			keys, err := db.GetSSHKeys(ctx, pool, u.ID)
 			if err != nil {
+				fmt.Printf("[pubkey] key lookup failed: %v\n", err)
 				return false
 			}
+			fmt.Printf("[pubkey] found %d stored key(s) for user %s\n", len(keys), u.Username)
 			for _, k := range keys {
 				allowed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(k.KeyData))
 				if err != nil {
+					fmt.Printf("[pubkey] parse error for stored key: %v | raw=%q\n", err, k.KeyData[:min(60, len(k.KeyData))])
 					continue
 				}
-				if gossh.KeysEqual(key, allowed) {
+				eq := gossh.KeysEqual(key, allowed)
+				fmt.Printf("[pubkey] comparing: stored_type=%s equal=%v\n", allowed.Type(), eq)
+				if eq {
 					return true
 				}
 			}

@@ -197,7 +197,10 @@ in {
       description = "alternate.sh retro Unix timeshare social network";
       wantedBy = [ "multi-user.target" ];
       after    = [ "network.target" ]
-             ++ lib.optional cfg.database.createLocally "postgresql.service";
+             ++ lib.optionals cfg.database.createLocally [
+               "postgresql.service"
+               "postgresql-setup.service"
+             ];
       requires = lib.optional cfg.database.createLocally "postgresql.service";
 
       # Generate SSH host key on first start if missing.
