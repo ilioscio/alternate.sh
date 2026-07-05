@@ -70,12 +70,12 @@ func scanUser(row pgx.Row) (*User, error) {
 }
 
 func GetUserByUsername(ctx context.Context, pool *pgxpool.Pool, username string) (*User, error) {
-	row := pool.QueryRow(ctx, `SELECT`+userColumns+`FROM users WHERE username = $1`, username)
+	row := pool.QueryRow(ctx, `SELECT`+userColumns+` FROM users WHERE username = $1`, username)
 	return scanUser(row)
 }
 
 func GetUserByID(ctx context.Context, pool *pgxpool.Pool, id string) (*User, error) {
-	row := pool.QueryRow(ctx, `SELECT`+userColumns+`FROM users WHERE id = $1`, id)
+	row := pool.QueryRow(ctx, `SELECT`+userColumns+` FROM users WHERE id = $1`, id)
 	return scanUser(row)
 }
 
