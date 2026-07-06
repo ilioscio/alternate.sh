@@ -153,9 +153,11 @@ func (rl *Readline) ReadLine(prompt string) (string, error) {
 // redraw redraws the entire line from the start of the prompt.
 // It handles multi-row lines by tracking rl.cur (cursor column from prompt start).
 func (rl *Readline) redraw(prompt string, promptLen int, buf []rune, pos int) {
-	if rl.width > 0 && rl.cur >= rl.width {
+	if rl.width > 0 && rl.cur > rl.width {
 		// Cursor has wrapped onto a row below the prompt row; move back up.
-		rowsBack := rl.cur / rl.width
+		// Use (cur-1)/width so that cur==width (deferred-wrap, still on row 0)
+		// does not incorrectly add an extra row.
+		rowsBack := (rl.cur - 1) / rl.width
 		fmt.Fprintf(rl.w, "\x1b[%dA", rowsBack)
 		rl.w.Write([]byte("\r\x1b[J")) // CR + erase to end of screen
 	} else {
