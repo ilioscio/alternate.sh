@@ -10,8 +10,10 @@ import (
 // home/end, Ctrl+A/E/K/U, up/down history, Ctrl+C, Ctrl+D.
 //
 // When width > 0, redraw correctly handles lines that wrap across
-// multiple terminal rows by tracking the cursor's absolute column
-// offset from the start of the prompt.
+// multiple terminal rows. After filling the last column, we emit \r\n
+// to force the cursor to the start of the next row. This means rl.cur
+// that is a nonzero multiple of width always maps to (row=cur/width, col=0),
+// making the rowsBack formula unambiguous: rowsBack = cur / width.
 type Readline struct {
 	r       io.Reader
 	w       io.Writer
@@ -140,8 +142,9 @@ func (rl *Readline) ReadLine(prompt string) (string, error) {
 				buf = append(buf[:pos], append([]rune{r}, buf[pos:]...)...)
 				pos++
 				if pos == len(buf) {
-					rl.w.Write([]byte{b[0]}) // simple echo
+					rl.w.Write([]byte{b[0]})
 					rl.cur++
+					rl.wrapIfNeeded()
 				} else {
 					rl.redraw(prompt, promptLen, buf, pos)
 				}
@@ -153,11 +156,12 @@ func (rl *Readline) ReadLine(prompt string) (string, error) {
 // redraw redraws the entire line from the start of the prompt.
 // It handles multi-row lines by tracking rl.cur (cursor column from prompt start).
 func (rl *Readline) redraw(prompt string, promptLen int, buf []rune, pos int) {
-	if rl.width > 0 && rl.cur > rl.width {
-		// Cursor has wrapped onto a row below the prompt row; move back up.
-		// Use (cur-1)/width so that cur==width (deferred-wrap, still on row 0)
-		// does not incorrectly add an extra row.
-		rowsBack := (rl.cur - 1) / rl.width
+	if rl.width > 0 && rl.cur >= rl.width {
+		// Cursor is on a row below the prompt row; move back up.
+		// Because wrapIfNeeded ensures rl.cur is a multiple of width only when the
+		// cursor is physically at col 0 of the next row (not in deferred-wrap),
+		// the formula rl.cur/width gives the correct row offset.
+		rowsBack := rl.cur / rl.width
 		fmt.Fprintf(rl.w, "\x1b[%dA", rowsBack)
 		rl.w.Write([]byte("\r\x1b[J")) // CR + erase to end of screen
 	} else {
@@ -172,5 +176,17 @@ func (rl *Readline) redraw(prompt string, promptLen int, buf []rune, pos int) {
 		moveBack := len(buf) - pos
 		fmt.Fprintf(rl.w, "\x1b[%dD", moveBack)
 		rl.cur -= moveBack
+	} else {
+		// Cursor is at end of buffer; force past deferred-wrap if at a row boundary.
+		rl.wrapIfNeeded()
+	}
+}
+
+// wrapIfNeeded emits \r\n when the cursor is exactly at a terminal column
+// boundary (deferred-wrap state). This moves the cursor to col 0 of the next
+// row so rl.cur unambiguously maps to that physical position.
+func (rl *Readline) wrapIfNeeded() {
+	if rl.width > 0 && rl.cur > 0 && rl.cur%rl.width == 0 {
+		rl.w.Write([]byte("\r\n"))
 	}
 }
