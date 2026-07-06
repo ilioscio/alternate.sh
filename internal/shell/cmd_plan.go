@@ -17,7 +17,7 @@ func cmdPlan(s *Session, args []string) error {
 	s.Println("")
 	s.Println("Enter new plan (end with '.' on a line by itself, blank to clear):")
 
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 	var lines []string
 	for {
 		line, err := rl.ReadLine("")
@@ -54,7 +54,7 @@ func cmdProject(s *Session, args []string) error {
 
 	s.Printf("Current project: %s\r\n", s.User.Project)
 	s.Print("New project (blank to clear): ")
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 	project, err := rl.ReadLine("")
 	if err != nil {
 		return nil
@@ -96,7 +96,7 @@ func cmdPublic(s *Session, args []string) error {
 	s.Println("")
 	s.Println("Enter new public page (end with '.' on a line by itself):")
 
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 	var lines []string
 	for {
 		line, err := rl.ReadLine("")

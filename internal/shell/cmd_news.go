@@ -18,7 +18,7 @@ func cmdPost(s *Session, args []string) error {
 		groupName = args[0]
 	} else {
 		s.Print("Newsgroup: ")
-		rl := NewReadline(s.r, s.w)
+		rl := s.newRL()
 		groupName, _ = rl.ReadLine("")
 	}
 	groupName = strings.TrimSpace(groupName)
@@ -53,7 +53,7 @@ func browseGroups(s *Session) error {
 	s.Printf("Newsgroups — %d groups, %d unread\r\n\r\n", len(groups), totalUnread)
 	printGroupList(s, groups)
 
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 	for {
 		s.Print("\r\nEnter group name ('q' to quit): ")
 		line, err := rl.ReadLine("")
@@ -137,7 +137,7 @@ func browseGroup(s *Session, group *db.Newsgroup) {
 		printArticleList(s, arts)
 	}
 
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 	current := -1
 
 	for {
@@ -276,7 +276,7 @@ func postArticle(s *Session, group *db.Newsgroup, parentID *string, subject stri
 
 	if subject == "" {
 		s.Print("Subject: ")
-		rl := NewReadline(s.r, s.w)
+		rl := s.newRL()
 		subject, _ = rl.ReadLine("")
 		if subject == "" {
 			s.Println("Cancelled.")

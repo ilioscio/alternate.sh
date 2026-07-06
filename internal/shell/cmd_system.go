@@ -39,7 +39,7 @@ func cmdWall(s *Session, args []string) error {
 		message = strings.Join(args, " ")
 	} else {
 		s.Println("Enter broadcast message (end with '.' on a line by itself):")
-		rl := NewReadline(s.r, s.w)
+		rl := s.newRL()
 		var lines []string
 		for {
 			line, err := rl.ReadLine("")

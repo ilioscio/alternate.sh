@@ -106,9 +106,14 @@ func calendarEdit(s *Session) error {
 		}
 	}
 	s.Println("")
-	s.Println("Enter calendar entries — one per line, format: month/day description")
-	s.Println("Example: 7/15 Team meeting")
-	cal := readBody(s, "(end with '.' on a line by itself):")
+	s.Println("Enter new calendar entries (replaces all above). End with '.' on its own line.")
+	s.Println("Press '.' immediately to cancel without changes.")
+	s.Println("Format: month/day description  (e.g. 7/15 Team meeting)")
+	cal := readBody(s, "")
+	if cal == "" {
+		s.Println("No changes made.")
+		return nil
+	}
 	if err := db.UpdateCalendar(s.ctx, s.db, s.User.ID, cal); err != nil {
 		s.Println("calendar: error saving")
 		return nil

@@ -54,7 +54,7 @@ func Run(s *Session) {
 		}
 	}()
 
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 	for {
 		select {
 		case <-s.ctx.Done():

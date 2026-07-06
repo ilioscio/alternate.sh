@@ -6,7 +6,7 @@ import (
 )
 
 func cmdPasswd(s *Session, _ []string) error {
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 
 	s.Print("Current password: ")
 	current, err := readPassword(s.r, s.w)
@@ -60,7 +60,7 @@ func cmdPasswd(s *Session, _ []string) error {
 }
 
 func cmdChfn(s *Session, _ []string) error {
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 
 	s.Println("Change finger information. Press enter to keep current value.")
 	s.Printf("Name [%s]: ", s.User.DisplayName)

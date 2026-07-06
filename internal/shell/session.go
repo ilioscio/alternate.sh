@@ -126,3 +126,12 @@ func (s *Session) Resize(cols, rows int) {
 	s.rows = rows
 	s.mu.Unlock()
 }
+
+// newRL creates a Readline that knows the current terminal width so it can
+// correctly redraw lines that wrap across multiple rows.
+func (s *Session) newRL() *Readline {
+	s.mu.Lock()
+	cols := s.cols
+	s.mu.Unlock()
+	return &Readline{r: s.r, w: s.w, width: cols}
+}

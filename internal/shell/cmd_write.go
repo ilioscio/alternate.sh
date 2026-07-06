@@ -45,7 +45,7 @@ func cmdWrite(s *Session, args []string) error {
 	} else {
 		// Interactive mode: read until EOF or "."
 		s.Printf("Message to %s (end with '.' on a line by itself or Ctrl+D):\r\n", target)
-		rl := NewReadline(s.r, s.w)
+		rl := s.newRL()
 		var lines []string
 		for {
 			line, err := rl.ReadLine("")

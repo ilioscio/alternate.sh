@@ -59,7 +59,7 @@ func cmdMsgs(s *Session, args []string) error {
 
 func motdSet(s *Session) error {
 	s.Println("Enter new MOTD (end with '.' on a line by itself):")
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 	var lines []string
 	for {
 		line, err := rl.ReadLine("")

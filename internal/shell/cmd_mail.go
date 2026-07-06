@@ -14,7 +14,7 @@ func readBody(s *Session, hint string) string {
 	if hint != "" {
 		s.Println(hint)
 	}
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 	var lines []string
 	for {
 		line, err := rl.ReadLine("")
@@ -29,7 +29,7 @@ func readBody(s *Session, hint string) string {
 // confirm asks a yes/no question and returns true for 'y'.
 func confirm(s *Session, prompt string) bool {
 	s.Print(prompt)
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 	ans, _ := rl.ReadLine("")
 	return strings.ToLower(strings.TrimSpace(ans)) == "y"
 }
@@ -62,7 +62,7 @@ func mailbox(s *Session) error {
 	s.Printf("Mailbox — %d message(s), %d unread\r\n\r\n", len(msgs), unread)
 	printMailList(s, msgs)
 
-	rl := NewReadline(s.r, s.w)
+	rl := s.newRL()
 	current := -1
 
 	for {
@@ -126,6 +126,10 @@ func mailbox(s *Session) error {
 					subj = "Re: " + subj
 				}
 				composeMail(s, m.SenderName, subj, &m.ID)
+				// Refresh so any new messages (including self-replies) appear.
+				msgs, _ = db.GetInbox(s.ctx, s.db, s.User.ID)
+				printMailList(s, msgs)
+				current = -1
 			}
 
 		default:
@@ -193,7 +197,7 @@ func composeMail(s *Session, recipientName, subject string, inReplyTo *string) e
 
 	if subject == "" {
 		s.Print("Subject: ")
-		rl := NewReadline(s.r, s.w)
+		rl := s.newRL()
 		subject, _ = rl.ReadLine("")
 		if subject == "" {
 			subject = "(no subject)"

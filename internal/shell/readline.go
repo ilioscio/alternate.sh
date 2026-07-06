@@ -8,11 +8,17 @@ import (
 // Readline provides basic line editing for raw terminal sessions.
 // It supports: printable ASCII input, backspace, left/right arrows,
 // home/end, Ctrl+A/E/K/U, up/down history, Ctrl+C, Ctrl+D.
+//
+// When width > 0, redraw correctly handles lines that wrap across
+// multiple terminal rows by tracking the cursor's absolute column
+// offset from the start of the prompt.
 type Readline struct {
 	r       io.Reader
 	w       io.Writer
 	history []string
 	histPos int
+	width   int // terminal width; 0 = single-line mode (no wrap handling)
+	cur     int // cursor column offset from start of prompt output
 }
 
 func NewReadline(r io.Reader, w io.Writer) *Readline {
@@ -24,6 +30,8 @@ func NewReadline(r io.Reader, w io.Writer) *Readline {
 // Returns ("", nil) on Ctrl+C (clear line, try again).
 func (rl *Readline) ReadLine(prompt string) (string, error) {
 	rl.w.Write([]byte(prompt))
+	promptLen := len([]rune(prompt))
+	rl.cur = promptLen
 
 	var buf []rune
 	pos := 0
@@ -50,7 +58,7 @@ func (rl *Readline) ReadLine(prompt string) (string, error) {
 			if pos > 0 {
 				buf = append(buf[:pos-1], buf[pos:]...)
 				pos--
-				rl.redraw(prompt, buf, pos)
+				rl.redraw(prompt, promptLen, buf, pos)
 			}
 
 		case 0x03: // Ctrl+C
@@ -65,20 +73,20 @@ func (rl *Readline) ReadLine(prompt string) (string, error) {
 
 		case 0x01: // Ctrl+A — beginning of line
 			pos = 0
-			rl.moveCursor(prompt, buf, pos)
+			rl.redraw(prompt, promptLen, buf, pos)
 
 		case 0x05: // Ctrl+E — end of line
 			pos = len(buf)
-			rl.moveCursor(prompt, buf, pos)
+			rl.redraw(prompt, promptLen, buf, pos)
 
 		case 0x0b: // Ctrl+K — kill to end
 			buf = buf[:pos]
-			rl.redraw(prompt, buf, pos)
+			rl.redraw(prompt, promptLen, buf, pos)
 
 		case 0x15: // Ctrl+U — kill to beginning
 			buf = buf[pos:]
 			pos = 0
-			rl.redraw(prompt, buf, pos)
+			rl.redraw(prompt, promptLen, buf, pos)
 
 		case 0x1b: // Escape sequence
 			seq := make([]byte, 2)
@@ -92,67 +100,75 @@ func (rl *Readline) ReadLine(prompt string) (string, error) {
 					rl.histPos--
 					buf = []rune(rl.history[rl.histPos])
 					pos = len(buf)
-					rl.redraw(prompt, buf, pos)
+					rl.redraw(prompt, promptLen, buf, pos)
 				}
 			case 'B': // Down — history next
 				if rl.histPos < len(rl.history)-1 {
 					rl.histPos++
 					buf = []rune(rl.history[rl.histPos])
 					pos = len(buf)
-					rl.redraw(prompt, buf, pos)
+					rl.redraw(prompt, promptLen, buf, pos)
 				} else {
 					rl.histPos = len(rl.history)
 					buf = nil
 					pos = 0
-					rl.redraw(prompt, buf, pos)
+					rl.redraw(prompt, promptLen, buf, pos)
 				}
 			case 'C': // Right
 				if pos < len(buf) {
 					pos++
+					rl.cur++
 					rl.w.Write([]byte("\x1b[C"))
 				}
 			case 'D': // Left
 				if pos > 0 {
 					pos--
+					rl.cur--
 					rl.w.Write([]byte("\x1b[D"))
 				}
 			case 'H': // Home
 				pos = 0
-				rl.moveCursor(prompt, buf, pos)
+				rl.redraw(prompt, promptLen, buf, pos)
 			case 'F': // End
 				pos = len(buf)
-				rl.moveCursor(prompt, buf, pos)
+				rl.redraw(prompt, promptLen, buf, pos)
 			}
 
 		default:
 			if b[0] >= 0x20 && b[0] < 0x7f {
 				r := rune(b[0])
-				// Insert at pos
 				buf = append(buf[:pos], append([]rune{r}, buf[pos:]...)...)
 				pos++
 				if pos == len(buf) {
 					rl.w.Write([]byte{b[0]}) // simple echo
+					rl.cur++
 				} else {
-					rl.redraw(prompt, buf, pos)
+					rl.redraw(prompt, promptLen, buf, pos)
 				}
 			}
 		}
 	}
 }
 
-// redraw redraws the entire line and repositions the cursor.
-func (rl *Readline) redraw(prompt string, buf []rune, pos int) {
-	// CR, erase to end of line, reprint prompt+buffer, reposition cursor.
-	rl.w.Write([]byte("\r\x1b[K"))
+// redraw redraws the entire line from the start of the prompt.
+// It handles multi-row lines by tracking rl.cur (cursor column from prompt start).
+func (rl *Readline) redraw(prompt string, promptLen int, buf []rune, pos int) {
+	if rl.width > 0 && rl.cur >= rl.width {
+		// Cursor has wrapped onto a row below the prompt row; move back up.
+		rowsBack := rl.cur / rl.width
+		fmt.Fprintf(rl.w, "\x1b[%dA", rowsBack)
+		rl.w.Write([]byte("\r\x1b[J")) // CR + erase to end of screen
+	} else {
+		rl.w.Write([]byte("\r\x1b[K")) // CR + erase to end of line
+	}
+
 	rl.w.Write([]byte(prompt))
 	rl.w.Write([]byte(string(buf)))
-	if pos < len(buf) {
-		fmt.Fprintf(rl.w, "\x1b[%dD", len(buf)-pos)
-	}
-}
+	rl.cur = promptLen + len(buf)
 
-// moveCursor moves the cursor to pos without redrawing buffer content.
-func (rl *Readline) moveCursor(prompt string, buf []rune, pos int) {
-	// Simplest: full redraw.
-	rl.redraw(prompt, buf, pos)
+	if pos < len(buf) {
+		moveBack := len(buf) - pos
+		fmt.Fprintf(rl.w, "\x1b[%dD", moveBack)
+		rl.cur -= moveBack
+	}
 }
