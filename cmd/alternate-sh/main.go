@@ -71,7 +71,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := db.Connect(ctx, cfg.Database.DSN)
+	pool, err := db.Connect(ctx, cfg.Database.DSN, cfg.Database.MaxConns)
 	if err != nil {
 		return fmt.Errorf("database: %w", err)
 	}
@@ -80,6 +80,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err := db.Migrate(ctx, pool); err != nil {
 		return fmt.Errorf("migrations: %w", err)
 	}
+
+	db.StartJanitor(ctx, pool)
 
 	hub := presence.NewHub()
 	sshSrv := server.NewSSH(cfg, pool, hub)
@@ -106,7 +108,7 @@ func runAdduser(cmd *cobra.Command, _ []string) error {
 	}
 
 	ctx := context.Background()
-	pool, err := db.Connect(ctx, cfg.Database.DSN)
+	pool, err := db.Connect(ctx, cfg.Database.DSN, cfg.Database.MaxConns)
 	if err != nil {
 		return fmt.Errorf("database: %w", err)
 	}
@@ -162,7 +164,7 @@ func runSetpassword(cmd *cobra.Command, _ []string) error {
 	}
 
 	ctx := context.Background()
-	pool, err := db.Connect(ctx, cfg.Database.DSN)
+	pool, err := db.Connect(ctx, cfg.Database.DSN, cfg.Database.MaxConns)
 	if err != nil {
 		return fmt.Errorf("database: %w", err)
 	}

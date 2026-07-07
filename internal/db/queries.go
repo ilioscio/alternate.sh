@@ -271,11 +271,13 @@ func GetSystemMessages(ctx context.Context, pool *pgxpool.Pool, userID string) (
 		return nil, err
 	}
 
-	// Mark all as read
-	for _, id := range ids {
-		pool.Exec(ctx,
-			`INSERT INTO user_message_reads (user_id, message_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-			userID, id,
+	// Mark all as read in one statement
+	if len(ids) > 0 {
+		pool.Exec(ctx, `
+			INSERT INTO user_message_reads (user_id, message_id)
+			SELECT $1, unnest($2::uuid[])
+			ON CONFLICT DO NOTHING`,
+			userID, ids,
 		)
 	}
 	return bodies, nil
@@ -332,10 +334,9 @@ func CreateSession(ctx context.Context, pool *pgxpool.Pool, userID string) (stri
 }
 
 // GetSessionUser looks up the user for a valid, non-expired session token.
-// Expired sessions are deleted as a side effect.
+// Expired rows are ignored here and swept by the janitor (see StartJanitor),
+// keeping this hot read path free of locking writes.
 func GetSessionUser(ctx context.Context, pool *pgxpool.Pool, token string) (*User, error) {
-	pool.Exec(ctx, `DELETE FROM sessions WHERE expires_at < NOW()`)
-
 	var userID string
 	err := pool.QueryRow(ctx,
 		`SELECT user_id::text FROM sessions WHERE token = $1 AND expires_at > NOW()`, token,

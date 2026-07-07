@@ -33,7 +33,8 @@ type WebConfig struct {
 }
 
 type DatabaseConfig struct {
-	DSN string `toml:"dsn"`
+	DSN      string `toml:"dsn"`
+	MaxConns int    `toml:"max_conns"`
 }
 
 type FederationConfig struct {
@@ -66,8 +67,9 @@ func defaults() *Config {
 			Hostname: "localhost",
 			MOTD:     "Welcome to alternate.sh",
 		},
-		SSH:    SSHConfig{Port: 2222},
-		Web:    WebConfig{Port: 8080},
-		Limits: LimitsConfig{MaxUsers: 500, MailPerHour: 50, NewsPerDay: 20},
+		SSH:      SSHConfig{Port: 2222},
+		Web:      WebConfig{Port: 8080},
+		Database: DatabaseConfig{MaxConns: 25},
+		Limits:   LimitsConfig{MaxUsers: 500, MailPerHour: 50, NewsPerDay: 20},
 	}
 }

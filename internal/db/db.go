@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -14,8 +15,17 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, dsn)
+func Connect(ctx context.Context, dsn string, maxConns int) (*pgxpool.Pool, error) {
+	poolCfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parsing dsn: %w", err)
+	}
+	if maxConns > 0 {
+		poolCfg.MaxConns = int32(maxConns)
+	}
+	poolCfg.MinConns = 2 // keep warm connections so login bursts don't pay dial latency
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating pool: %w", err)
 	}
@@ -24,6 +34,23 @@ func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("pinging database: %w", err)
 	}
 	return pool, nil
+}
+
+// StartJanitor runs periodic background cleanup (expired web sessions) until
+// ctx is cancelled. This keeps maintenance writes off the request hot paths.
+func StartJanitor(ctx context.Context, pool *pgxpool.Pool) {
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				pool.Exec(ctx, `DELETE FROM sessions WHERE expires_at < NOW()`)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 }
 
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
