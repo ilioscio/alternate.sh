@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ilioscio/alternate.sh/internal/db"
 	"github.com/ilioscio/alternate.sh/internal/presence"
 )
 
@@ -84,10 +85,18 @@ func cmdMesg(s *Session, args []string) error {
 
 	switch args[0] {
 	case "y", "yes", "on":
+		if err := db.UpdateMesg(s.ctx, s.db, s.User.ID, true); err != nil {
+			s.Println("mesg: error saving")
+			return nil
+		}
 		s.User.MesgOn = true
 		s.hub.SetMesg(s.ID, true)
 		s.Println("mesg: messages enabled")
 	case "n", "no", "off":
+		if err := db.UpdateMesg(s.ctx, s.db, s.User.ID, false); err != nil {
+			s.Println("mesg: error saving")
+			return nil
+		}
 		s.User.MesgOn = false
 		s.hub.SetMesg(s.ID, false)
 		s.Println("mesg: messages disabled")

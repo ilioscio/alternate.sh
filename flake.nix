@@ -61,7 +61,17 @@
         };
 
         # ── Checks (nix flake check) ──────────────────────────────────────────
-        checks.build = self.packages.${system}.default;
+        checks = {
+          build = self.packages.${system}.default;
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          # Full-VM integration test driving every shell command over SSH.
+          # Run with:  nix build .#checks.x86_64-linux.commands
+          commands = import ./nix/tests.nix {
+            inherit pkgs;
+            package = self.packages.${system}.default;
+            module  = nixosModule;
+          };
+        };
       }
     ) // {
       # ── NixOS module (system-independent) ────────────────────────────────
