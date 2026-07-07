@@ -84,7 +84,7 @@ func (s *SSHServer) handle(gs gossh.Session) {
 		return
 	}
 
-	pty, _, hasPTY := gs.Pty()
+	pty, winCh, hasPTY := gs.Pty()
 	rows, cols := 24, 80
 	if hasPTY {
 		rows = pty.Window.Height
@@ -99,6 +99,17 @@ func (s *SSHServer) handle(gs gossh.Session) {
 		gs, gs, rows, cols,
 		u, s.hub, s.pool, s.cfg,
 	)
+
+	// Forward SSH window-change requests to the session so line editing
+	// always knows the real terminal width.
+	if hasPTY {
+		go func() {
+			for win := range winCh {
+				sess.Resize(win.Width, win.Height)
+			}
+		}()
+	}
+
 	shell.Run(sess)
 }
 
