@@ -2,7 +2,6 @@ package shell
 
 import (
 	"strings"
-	"time"
 
 	"github.com/ilioscio/alternate.sh/internal/db"
 	"github.com/ilioscio/alternate.sh/internal/presence"
@@ -63,6 +62,7 @@ func cmdWrite(s *Session, args []string) error {
 	}
 
 	notice := presence.WriteNotice{
+		Kind:    presence.NoticeWrite,
 		From:    s.User.Username,
 		Message: message,
 	}
@@ -106,21 +106,37 @@ func cmdMesg(s *Session, args []string) error {
 	return nil
 }
 
-// formatWriteNotice formats an incoming write notice for display.
-func formatWriteNotice(notice presence.WriteNotice) string {
-	ts := time.Now().Format("15:04:05")
-	var sb strings.Builder
-	sb.WriteString("\r\n")
-	sb.WriteString("\x1b[33m") // yellow
-	sb.WriteString("Message from ")
-	sb.WriteString(notice.From)
-	sb.WriteString(" [")
-	sb.WriteString(ts)
-	sb.WriteString("]...\x1b[0m\r\n")
-	for _, line := range strings.Split(notice.Message, "\n") {
-		sb.WriteString(line)
-		sb.WriteString("\r\n")
+// cmdBiff toggles biff-style new-mail notifications during a session.
+func cmdBiff(s *Session, args []string) error {
+	if len(args) == 0 {
+		if s.User.Biff {
+			s.Println("biff: new-mail notifications are on")
+		} else {
+			s.Println("biff: new-mail notifications are off")
+		}
+		return nil
 	}
-	sb.WriteString("\x1b[33mEOF\x1b[0m\r\n")
-	return sb.String()
+
+	switch args[0] {
+	case "y", "yes", "on":
+		if err := db.UpdateBiff(s.ctx, s.db, s.User.ID, true); err != nil {
+			s.Println("biff: error saving")
+			return nil
+		}
+		s.User.Biff = true
+		s.hub.SetBiff(s.ID, true)
+		s.Println("biff: new-mail notifications enabled")
+	case "n", "no", "off":
+		if err := db.UpdateBiff(s.ctx, s.db, s.User.ID, false); err != nil {
+			s.Println("biff: error saving")
+			return nil
+		}
+		s.User.Biff = false
+		s.hub.SetBiff(s.ID, false)
+		s.Println("biff: new-mail notifications disabled")
+	default:
+		usageError(s, "biff", "[y|n]")
+	}
+	return nil
 }
+

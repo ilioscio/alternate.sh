@@ -118,16 +118,23 @@ func renderNotice(n presence.WriteNotice) string {
 	ts := time.Now().Format("15:04:05")
 	var sb strings.Builder
 	sb.WriteString("\r\n")
-	if strings.HasPrefix(n.From, "WALL:") {
-		from := strings.TrimPrefix(n.From, "WALL:")
-		sb.WriteString("\x1b[31m") // red for wall
+
+	switch n.Kind {
+	case presence.NoticeWall:
+		sb.WriteString("\x1b[31m") // red
 		sb.WriteString("Broadcast from ")
-		sb.WriteString(from)
-	} else {
-		sb.WriteString("\x1b[33m") // yellow for write
+		sb.WriteString(n.From)
+	case presence.NoticeBiff:
+		// Single-line alert, no EOF marker.
+		return fmt.Sprintf("\r\n\x1b[36mNew mail from %s [%s]: %s\x1b[0m\r\n", n.From, ts, n.Message)
+	case presence.NoticeTalk:
+		return fmt.Sprintf("\r\n\x1b[35m%s [%s]\x1b[0m\r\n", n.Message, ts)
+	default: // NoticeWrite
+		sb.WriteString("\x1b[33m") // yellow
 		sb.WriteString("Message from ")
 		sb.WriteString(n.From)
 	}
+
 	sb.WriteString(" [")
 	sb.WriteString(ts)
 	sb.WriteString("]...\x1b[0m\r\n")

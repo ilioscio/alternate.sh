@@ -110,6 +110,7 @@ func (s *Session) Register() {
 		LoginAt:   time.Now(),
 		State:     "shell",
 		MesgOn:    s.User.MesgOn,
+		BiffOn:    s.User.Biff,
 		WriteCh:   s.writeCh,
 	})
 }
@@ -125,6 +126,20 @@ func (s *Session) Resize(cols, rows int) {
 	s.cols = cols
 	s.rows = rows
 	s.mu.Unlock()
+}
+
+// Size returns the current terminal dimensions with sane defaults.
+func (s *Session) Size() (rows, cols int) {
+	s.mu.Lock()
+	rows, cols = s.rows, s.cols
+	s.mu.Unlock()
+	if rows <= 0 {
+		rows = 24
+	}
+	if cols <= 0 {
+		cols = 80
+	}
+	return rows, cols
 }
 
 // newRL creates a Readline that queries the terminal width live, so resizes

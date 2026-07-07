@@ -7,6 +7,7 @@ adjusting the tests.
 | Layer | Location | Runs | What it covers |
 |---|---|---|---|
 | Go unit tests | `internal/shell/readline_test.go` | `go test ./internal/shell/` | Line-editing correctness against an emulated terminal |
+| Go unit tests | `internal/presence/room_test.go` | `go test ./internal/presence/` | Talk room broker: join/invite/data-routing/leave/teardown semantics |
 | NixOS VM integration test | `nix/tests.nix` | `nix build .#checks.x86_64-linux.commands` | Every shell command, end to end, over real SSH with a real PostgreSQL |
 
 Both run as part of `nix flake check` (the VM test on Linux systems only —
@@ -210,7 +211,8 @@ exactly. Reference for every interactive command:
 | `motd set` (admin) | body lines…, `.` |
 | `wall` (admin, no args) | body lines…, `.` |
 | `wall <text>` / `write <user> <text>` | none (inline args form) |
-| `mesg y` / `n`, `who`, `w`, `last`, `uptime`, `fortune`, `motd`, `msgs`, `help`, `finger` | none |
+| `mesg y` / `n`, `biff y` / `n`, `who`, `w`, `last`, `uptime`, `fortune`, `motd`, `msgs`, `help`, `finger` | none |
+| `talk <users…>` / `ytalk` | raw character stream once in the room; `\003` (Ctrl+C) leaves. Scripted input needs real-time pacing: `{ printf 'talk alice\n'; sleep 12; printf '\003'; }` as ssh stdin |
 
 Note the news reading quirk: after displaying an article, an inline
 `[f=followup, n=next unread, q=back]` prompt consumes **one** line; any
@@ -255,9 +257,21 @@ changed MOTD, carol's changed password). Current sequence:
     `write` against a fresh background session, `mesg y` restores. *(This
     subtest exists because `cmdMesg` originally forgot the DB write — the
     setting silently reverted on logout. Regression guard.)*
-16. **passwd** — carol changes her password; new password logs in (prompt
+16. **biff live** — background bob at his prompt receives
+    `New mail from alice` with the subject when alice sends mail.
+17. **biff toggle** — `biff n` persists (psql), `biff y` restores. Leave
+    biff ON afterwards or the live test breaks on reordering.
+18. **talk** — bob idles at his prompt (receives the invitation notice),
+    answers `talk alice`, alice's typed canary renders on bob's screen,
+    alice's Ctrl+C shows `alice (left)` on bob's side. Ordering within the
+    subtest is delicate: bob's session must exist *before* alice initiates
+    (or she aborts with "no one to talk to"), and all output assertions go
+    through `clean()` because the talk screen is drawn with cursor-addressing
+    escapes. Real-time pacing comes from `sleep` between `printf`s in the
+    stdin pipeline.
+19. **passwd** — carol changes her password; new password logs in (prompt
     asserted); old password is rejected (nonzero ssh exit).
-17. **last** — shows records for all three users.
+20. **last** — shows records for all three users.
 
 ### Timing notes
 
@@ -289,6 +303,13 @@ changed MOTD, carol's changed password). Current sequence:
   001 as `Welcome to alternate.sh`), not from the module's `motd` option —
   don't be surprised that the module option has no effect on the banner.
   After subtest 4 the banner shows `MOTD-CANARY`.
+- Talk rooms are keyed by the **sorted participant set** (`talk:alice+bob`),
+  so `talk bob` from alice and `talk alice` from bob deterministically meet.
+  ytalk is the same command with more names (`ytalk` is an alias of `talk`).
+  The invitation notice tells the invitee the exact command to type.
+- Notification gating: `mesg` gates write and talk invitations, `biff` gates
+  new-mail alerts, `wall` is always delivered (changed in Phase 4 — walls
+  used to respect mesg).
 
 ### Adding a new command test
 

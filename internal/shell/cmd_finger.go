@@ -32,7 +32,7 @@ func fingerList(s *Session) error {
 	s.Printf("%-16s %-10s %-20s %s\r\n", "Login", "TTY", "Login time", "From")
 	s.HLine()
 	for _, e := range entries {
-		idle := idleStr(e.LoginAt)
+		idle := idleStr(e.LastActivity)
 		from := e.FromAddr
 		if from == "" {
 			from = "local"
@@ -71,7 +71,7 @@ func fingerUser(s *Session, username string) error {
 		}
 	} else {
 		for _, e := range sessions {
-			idle := idleStr(e.LoginAt)
+			idle := idleStr(e.LastActivity)
 			s.Printf("On since %s on %s, idle %s\r\n",
 				e.LoginAt.Format("Mon Jan  2 15:04 (MST)"),
 				e.TTY, idle,

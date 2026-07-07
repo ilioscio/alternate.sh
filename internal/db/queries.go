@@ -30,6 +30,7 @@ type User struct {
 	HushLogin       bool
 	Admin           bool
 	Calendar        string
+	Biff            bool
 	CreatedAt       time.Time
 	LastLogin       *time.Time
 }
@@ -54,7 +55,7 @@ type LoginRecord struct {
 const userColumns = `
 	id, username, display_name, password_hash, office, home_phone,
 	plan, project, signature, public_page, mesg_on, vacation,
-	vacation_message, hush_login, admin, calendar, created_at, last_login`
+	vacation_message, hush_login, admin, calendar, biff, created_at, last_login`
 
 func scanUser(row pgx.Row) (*User, error) {
 	u := &User{}
@@ -62,7 +63,7 @@ func scanUser(row pgx.Row) (*User, error) {
 		&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash,
 		&u.Office, &u.HomePhone, &u.Plan, &u.Project,
 		&u.Signature, &u.PublicPage, &u.MesgOn, &u.Vacation,
-		&u.VacationMessage, &u.HushLogin, &u.Admin, &u.Calendar, &u.CreatedAt, &u.LastLogin,
+		&u.VacationMessage, &u.HushLogin, &u.Admin, &u.Calendar, &u.Biff, &u.CreatedAt, &u.LastLogin,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -130,6 +131,11 @@ func UpdateFingerInfo(ctx context.Context, pool *pgxpool.Pool, userID, displayNa
 
 func UpdateMesg(ctx context.Context, pool *pgxpool.Pool, userID string, on bool) error {
 	_, err := pool.Exec(ctx, `UPDATE users SET mesg_on = $1 WHERE id = $2`, on, userID)
+	return err
+}
+
+func UpdateBiff(ctx context.Context, pool *pgxpool.Pool, userID string, on bool) error {
+	_, err := pool.Exec(ctx, `UPDATE users SET biff = $1 WHERE id = $2`, on, userID)
 	return err
 }
 

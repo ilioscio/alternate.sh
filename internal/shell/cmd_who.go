@@ -2,7 +2,6 @@ package shell
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/ilioscio/alternate.sh/internal/db"
@@ -34,11 +33,11 @@ func cmdW(s *Session, args []string) error {
 
 	s.Printf("%s  up %s,  %d user%s\r\n",
 		now.Format("15:04:05"),
-		uptime(now),
+		fmtUptime(time.Since(serverStart).Round(time.Second)),
 		len(entries),
 		plural(len(entries)),
 	)
-	s.Printf("%-16s %-10s %-20s %-8s %s\r\n", "USER", "TTY", "FROM", "LOGIN@", "WHAT")
+	s.Printf("%-16s %-10s %-20s %-8s %-6s %s\r\n", "USER", "TTY", "FROM", "LOGIN@", "IDLE", "WHAT")
 	s.HLine()
 
 	for _, e := range entries {
@@ -50,10 +49,11 @@ func cmdW(s *Session, args []string) error {
 		if state == "" {
 			state = "shell"
 		}
-		s.Printf("%-16s %-10s %-20s %-8s %s\r\n",
+		s.Printf("%-16s %-10s %-20s %-8s %-6s %s\r\n",
 			e.Username, e.TTY,
 			truncate(from, 20),
 			e.LoginAt.Format("15:04"),
+			idleStr(e.LastActivity),
 			state,
 		)
 	}
@@ -93,10 +93,6 @@ func cmdLast(s *Session, args []string) error {
 	return nil
 }
 
-func uptime(now time.Time) string {
-	// Placeholder — in a real deployment we'd track server start time.
-	return "?"
-}
 
 func plural(n int) string {
 	if n == 1 {
@@ -121,6 +117,3 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("00:%02d", m)
 }
 
-func strings_repeat(s string, n int) string {
-	return strings.Repeat(s, n)
-}

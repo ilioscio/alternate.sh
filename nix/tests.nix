@@ -35,7 +35,12 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     import base64
+    import re
     from datetime import datetime, timedelta
+
+    def clean(s):
+        """Strip ANSI escape sequences (talk's screen is drawn with them)."""
+        return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", s)
 
     SSH = (
         "sshpass -p {pw} ssh -tt "
@@ -115,6 +120,7 @@ pkgs.testers.runNixOSTest {
             "read your mailbox",                     # help mail
             "browse newsgroups",                     # help rn (alias resolution)
             "USER",                                  # w header
+            "IDLE",                                  # w idle column (live activity tracking)
             "user",                                  # uptime
             "mesg: messages are on",
             "Finger information updated.",
@@ -306,6 +312,67 @@ pkgs.testers.runNixOSTest {
         out = sh("bob", "bobpass12345", ["mesg y"])
         expect(out, "mesg: messages enabled")
         assert psql("SELECT mesg_on FROM users WHERE username='bob'") == "t"
+
+    # ── biff (live new-mail alerts) ───────────────────────────────────────────
+    with subtest("biff: live notification reaches an active session"):
+        machine.execute(
+            "sleep 10 | " + SSH.format(user="bob", pw="bobpass12345")
+            + " > /tmp/bob-biff.out 2>&1 &"
+        )
+        machine.sleep(3)
+        out = sh("alice", "alicepass123", [
+            "mail bob", "BIFF-SUBJ-CANARY", "ping", ".", "y",
+        ])
+        expect(out, "Message sent to bob.")
+        machine.sleep(9)
+        bg = machine.succeed("cat /tmp/bob-biff.out")
+        expect(bg, "New mail from alice", "BIFF-SUBJ-CANARY")
+
+    with subtest("biff: toggle persists"):
+        out = sh("bob", "bobpass12345", ["biff", "biff n"])
+        expect(out,
+            "biff: new-mail notifications are on",
+            "biff: new-mail notifications disabled",
+        )
+        assert psql("SELECT biff FROM users WHERE username='bob'") == "f"
+        out = sh("bob", "bobpass12345", ["biff y"])
+        expect(out, "biff: new-mail notifications enabled")
+        assert psql("SELECT biff FROM users WHERE username='bob'") == "t"
+
+    # ── talk (split-screen live chat) ─────────────────────────────────────────
+    with subtest("talk: invitation, live text, peer leave"):
+        # bob first: he must be at his prompt to receive the invitation.
+        # He waits 4s (invitation arrives in that window), answers, and stays
+        # long enough to receive alice's text and see her leave.
+        machine.execute(
+            "{ sleep 4; printf 'talk alice\\n'; sleep 12; printf '\\003'; } | "
+            + SSH.format(user="bob", pw="bobpass12345")
+            + " > /tmp/bob-talk.out 2>&1 &"
+        )
+        machine.sleep(2)
+        # alice: enter talk (invites bob), wait for him, type the canary, leave.
+        machine.execute(
+            "{ printf 'talk bob\\n'; sleep 8; printf 'TALK-CANARY'; sleep 3; printf '\\003'; } | "
+            + SSH.format(user="alice", pw="alicepass123")
+            + " > /tmp/alice-talk.out 2>&1 &"
+        )
+        machine.sleep(17)
+
+        alice_out = clean(machine.succeed("cat /tmp/alice-talk.out"))
+        bob_out = clean(machine.succeed("cat /tmp/bob-talk.out"))
+
+        expect(alice_out,
+            "waiting for others to join",   # ringing state before bob answers
+            "talk with bob",                # redraw after bob joins
+            "[talk session ended]",
+        )
+        expect(bob_out,
+            "connection requested by alice",  # invitation notice at the prompt
+            "Respond with: talk alice",
+            "talk with alice",                # joined alice's room
+            "TALK-CANARY",                    # live text rendered in alice's pane
+            "alice (left)",                   # alice's Ctrl+C updates her pane label
+        )
 
     # ── passwd ────────────────────────────────────────────────────────────────
     with subtest("passwd changes the password and the new one works"):

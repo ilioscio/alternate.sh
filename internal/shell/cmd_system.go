@@ -60,9 +60,9 @@ func cmdWall(s *Session, args []string) error {
 		if e.SessionID == s.ID {
 			continue
 		}
-		// Prefix "WALL:" so the REPL renderer can style it differently.
 		notice := presence.WriteNotice{
-			From:    "WALL:" + s.User.Username,
+			Kind:    presence.NoticeWall,
+			From:    s.User.Username,
 			Message: message,
 		}
 		select {
@@ -101,6 +101,7 @@ func helpForCommand(s *Session, cmd string) error {
 		"w":        "w                      — list users with current activity",
 		"last":     "last [user]            — show login history",
 		"write":    "write <user> [msg]     — send a message to a logged-in user",
+		"talk":     "talk <user> [user...]  — split-screen live chat; each party runs 'talk <the others>'",
 		"mesg":     "mesg [y|n]             — enable/disable incoming messages",
 		"motd":     "motd [set]             — display the message of the day; 'set' edits it (admin)",
 		"msgs":     "msgs [-q]              — read system messages",
@@ -111,6 +112,7 @@ func helpForCommand(s *Session, cmd string) error {
 		"passwd":   "passwd                 — change your password",
 		"chfn":     "chfn                   — change finger information",
 		"mail":     "mail [user]            — read your mailbox, or send mail to a user",
+		"biff":     "biff [y|n]             — toggle new-mail notifications during your session",
 		"vacation": "vacation [on|off|msg]  — manage your vacation auto-reply",
 		"news":     "news                   — browse newsgroups and read articles",
 		"post":     "post [group]           — post an article to a newsgroup",

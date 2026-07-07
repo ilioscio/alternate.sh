@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ilioscio/alternate.sh/internal/db"
+	"github.com/ilioscio/alternate.sh/internal/presence"
 )
 
 // readBody reads lines until '.' on its own line or EOF/error.
@@ -227,6 +228,7 @@ func composeMail(s *Session, recipientName, subject string, inReplyTo *string) e
 		return nil
 	}
 	s.Printf("Message sent to %s.\r\n", u.Username)
+	notifyNewMail(s, u.Username, s.User.Username, subject)
 
 	// Vacation auto-reply
 	if u.Vacation && u.VacationMessage != "" {
@@ -238,6 +240,15 @@ func composeMail(s *Session, recipientName, subject string, inReplyTo *string) e
 		}
 	}
 	return nil
+}
+
+// notifyNewMail pushes a biff-style alert to the recipient's live sessions.
+func notifyNewMail(s *Session, recipient, sender, subject string) {
+	s.hub.Send(recipient, presence.WriteNotice{
+		Kind:    presence.NoticeBiff,
+		From:    sender,
+		Message: subject,
+	})
 }
 
 func cmdVacation(s *Session, args []string) error {

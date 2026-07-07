@@ -35,6 +35,7 @@ func dispatch(s *Session, line string) error {
 		s.Printf("command not found: %s  (type 'help' for a list)\r\n", name)
 		return nil
 	}
+	s.hub.Touch(s.ID)
 	s.SetState(name)
 	defer s.SetState("shell")
 	return fn(s, args)
@@ -63,6 +64,7 @@ func init() {
 	register("w", cmdW)
 	register("last", cmdLast)
 	register("write", cmdWrite)
+	register("talk", cmdTalk, "ytalk")
 	register("mesg", cmdMesg)
 	register("motd", cmdMotd)
 	register("msgs", cmdMsgs)
@@ -73,6 +75,7 @@ func init() {
 	register("passwd", cmdPasswd)
 	register("chfn", cmdChfn)
 	register("mail", cmdMail, "m")
+	register("biff", cmdBiff)
 	register("vacation", cmdVacation)
 	register("news", cmdNews, "rn", "nn")
 	register("post", cmdPost)
