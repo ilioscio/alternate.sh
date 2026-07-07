@@ -57,7 +57,6 @@ func NewWebSocket(cfg *config.Config, pool *pgxpool.Pool, hub *presence.Hub) *We
 	s.mux.HandleFunc("/api/logout",  s.handleLogout)
 	s.mux.HandleFunc("/api/signup",  s.handleSignup)
 	s.mux.HandleFunc("/api/confirm", s.handleConfirmCode)
-	s.mux.HandleFunc("/confirm",     s.handleConfirmLink)
 	s.mux.HandleFunc("/ws",          s.handleWS)
 	s.mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

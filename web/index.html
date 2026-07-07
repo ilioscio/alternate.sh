@@ -441,7 +441,7 @@ html, body {
 
     <!-- Code confirmation (hidden until a signup is submitted) -->
     <form class="dlg-body" id="confirm-form" autocomplete="off" hidden>
-      <p class="dlg-note">Check your email for a confirmation link or code.</p>
+      <p class="dlg-note">Check your email for a 6-digit confirmation code.</p>
       <div class="field">
         <label for="inp-cf-code">code:</label>
         <input type="text" id="inp-cf-code" name="code" inputmode="numeric" spellcheck="false" maxlength="6" autocomplete="one-time-code">
@@ -758,7 +758,7 @@ signupForm.addEventListener('submit', async e => {
     pendingUser = suUser.value.trim();
     suBtn.disabled = false;
     showForm('confirm');
-    cfError.textContent = 'Check your email for a link or code.';
+    cfError.textContent = 'Check your email for a 6-digit code.';
     cfError.className = 'ok';
     cfCode.focus();
   } catch (err) {

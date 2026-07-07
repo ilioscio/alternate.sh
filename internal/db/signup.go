@@ -65,14 +65,6 @@ func CreatePendingAccount(ctx context.Context, pool *pgxpool.Pool, username, ema
 	return token, err
 }
 
-// GetPendingByToken returns a non-expired pending account by its token.
-func GetPendingByToken(ctx context.Context, pool *pgxpool.Pool, token string) (*PendingAccount, error) {
-	return scanPending(pool.QueryRow(ctx, `
-		SELECT id::text, username, email, password_hash, token::text, code, attempts
-		FROM pending_accounts
-		WHERE token = $1 AND expires_at > NOW()`, token))
-}
-
 // GetPendingByUsername returns a non-expired pending account by username.
 func GetPendingByUsername(ctx context.Context, pool *pgxpool.Pool, username string) (*PendingAccount, error) {
 	return scanPending(pool.QueryRow(ctx, `

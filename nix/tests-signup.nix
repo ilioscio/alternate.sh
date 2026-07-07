@@ -69,11 +69,6 @@ pkgs.testers.runNixOSTest {
         assert m, f"no 6-digit code in email:\n{text}"
         return m.group(1)
 
-    def extract_token(text):
-        m = re.search(r"token=([0-9a-fA-F-]{36})", text)
-        assert m, f"no token in email:\n{text}"
-        return m.group(1)
-
     machine.wait_for_unit("postgresql.service")
     machine.wait_for_unit("alternate-sh.service")
     machine.wait_for_open_port(8080)
@@ -102,22 +97,22 @@ pkgs.testers.runNixOSTest {
         assert code == "200", f"login status {code}: {body}"
         assert '"token"' in body
 
-    with subtest("signup → confirm by LINK → login"):
+    with subtest("email contains a code but no clickable link"):
         code, _ = api("/api/signup", ip="10.0.0.2",
                      data={"username": "milo", "email": "milo@example.com", "password": "milopass1234"})
         assert code == "200"
-        token = extract_token(mail_text("milo@example.com"))
+        text = mail_text("milo@example.com")
+        assert re.search(r"\b\d{6}\b", text), "email has no 6-digit code"
+        assert "/confirm?token=" not in text, "email still contains a confirmation link"
 
-        # GET the confirmation link.
+        # The link endpoint is gone; confirmation is code-only.
         status = machine.succeed(
-            f"curl -s -o /tmp/page -w '%{{http_code}}' http://127.0.0.1:8080/confirm?token={token}"
+            "curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:8080/confirm?token=whatever'"
         ).strip()
-        assert status == "200", f"confirm link status {status}"
-        page = machine.succeed("cat /tmp/page")
-        assert "confirmed" in page.lower(), page
+        assert status == "404", f"/confirm should be gone (404), got {status}"
 
-        code, _ = api("/api/login", data={"username": "milo", "password": "milopass1234"})
-        assert code == "200"
+        # Confirm milo by code so later assertions have a consistent state.
+        api("/api/confirm", data={"username": "milo", "code": extract_code(text)})
 
     with subtest("disposable email rejected (no token consumed at that IP)"):
         code, body = api("/api/signup", ip="10.0.0.3",

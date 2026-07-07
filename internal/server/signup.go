@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"net/http"
 	"time"
 
@@ -74,7 +73,7 @@ func (s *WebSocketServer) handleSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code := numericCode(6)
-	token, err := db.CreatePendingAccount(r.Context(), s.pool, req.Username, emailAddr, string(hash), code, ip)
+	_, err = db.CreatePendingAccount(r.Context(), s.pool, req.Username, emailAddr, string(hash), code, ip)
 	if err != nil {
 		switch {
 		case errors.Is(err, db.ErrUsernameTaken):
@@ -91,7 +90,7 @@ func (s *WebSocketServer) handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.sendConfirmation(r.Context(), emailAddr, req.Username, token, code); err != nil {
+	if err := s.sendConfirmation(r.Context(), emailAddr, req.Username, code); err != nil {
 		// Roll back the pending row so a resend isn't blocked and no orphan lingers.
 		if p, e := db.GetPendingByUsername(r.Context(), s.pool, req.Username); e == nil {
 			db.DeletePending(r.Context(), s.pool, p.ID)
@@ -150,40 +149,17 @@ func (s *WebSocketServer) handleConfirmCode(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// handleConfirmLink confirms a pending account via the emailed link and shows
-// a small HTML page.
-func (s *WebSocketServer) handleConfirmLink(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
-	if token == "" {
-		confirmPage(w, "Invalid link", "This confirmation link is missing its token.")
-		return
-	}
-	p, err := db.GetPendingByToken(r.Context(), s.pool, token)
-	if err != nil {
-		confirmPage(w, "Link expired", "This confirmation link is invalid or has expired. Please sign up again.")
-		return
-	}
-	if _, err := db.ConfirmPendingAccount(r.Context(), s.pool, p); err != nil {
-		confirmPage(w, "Could not confirm", "That username or email was just taken. Please sign up again.")
-		return
-	}
-	confirmPage(w, "Account confirmed", fmt.Sprintf("Welcome, %s. You can now return to the terminal and log in.", p.Username))
-}
-
-// sendConfirmation emails the applicant a link and a code. Branding uses the
-// server hostname so there is a single place to rename the product later.
-func (s *WebSocketServer) sendConfirmation(ctx context.Context, to, username, token, code string) error {
+// sendConfirmation emails the applicant a 6-digit confirmation code. Branding
+// uses the server hostname so there is a single place to rename the product.
+func (s *WebSocketServer) sendConfirmation(ctx context.Context, to, username, code string) error {
 	brand := s.cfg.Server.Hostname
-	base := s.cfg.Web.PublicURL
-	link := fmt.Sprintf("%s/confirm?token=%s", base, token)
 
 	subject := fmt.Sprintf("Confirm your %s account", brand)
 	body := fmt.Sprintf(
 		"Welcome to %s, %s.\n\n"+
-			"Confirm your account by opening this link:\n\n  %s\n\n"+
-			"Or enter this code in the signup screen:\n\n  %s\n\n"+
+			"Enter this code in the signup screen to confirm your account:\n\n  %s\n\n"+
 			"This request expires in 24 hours. If you didn't sign up, ignore this email.\n",
-		brand, username, link, code,
+		brand, username, code,
 	)
 
 	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -206,20 +182,4 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(v)
-}
-
-var confirmTmpl = template.Must(template.New("confirm").Parse(`<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{.Title}}</title>
-<style>
-html,body{background:#050a05;color:#33ff33;font-family:'Courier New',monospace;padding:2rem;line-height:1.6}
-h1{font-size:1.1rem;letter-spacing:0.1em;margin-bottom:1rem}
-a{color:#33ff33}
-</style></head>
-<body><h1>{{.Title}}</h1><p>{{.Body}}</p><p><a href="/">&larr; back to {{.Brand}}</a></p></body></html>`))
-
-func confirmPage(w http.ResponseWriter, title, body string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	confirmTmpl.Execute(w, struct{ Title, Body, Brand string }{title, body, "terminal"})
 }
