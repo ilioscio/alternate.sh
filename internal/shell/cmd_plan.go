@@ -17,16 +17,7 @@ func cmdPlan(s *Session, args []string) error {
 	s.Println("")
 	s.Println("Enter new plan (end with '.' on a line by itself, blank to clear):")
 
-	rl := s.newRL()
-	var lines []string
-	for {
-		line, err := rl.ReadLine("")
-		if err != nil || line == "." {
-			break
-		}
-		lines = append(lines, line)
-	}
-	plan := strings.Join(lines, "\n")
+	plan := readBody(s, "")
 	if err := db.UpdatePlan(s.ctx, s.db, s.User.ID, plan); err != nil {
 		s.Println("error saving plan")
 		return nil
@@ -96,16 +87,7 @@ func cmdPublic(s *Session, args []string) error {
 	s.Println("")
 	s.Println("Enter new public page (end with '.' on a line by itself):")
 
-	rl := s.newRL()
-	var lines []string
-	for {
-		line, err := rl.ReadLine("")
-		if err != nil || line == "." {
-			break
-		}
-		lines = append(lines, line)
-	}
-	page := strings.Join(lines, "\n")
+	page := readBody(s, "")
 	if err := db.UpdatePublicPage(s.ctx, s.db, s.User.ID, page); err != nil {
 		s.Println("error saving public page")
 		return nil

@@ -38,21 +38,12 @@ func cmdWall(s *Session, args []string) error {
 	if len(args) > 0 {
 		message = strings.Join(args, " ")
 	} else {
-		s.Println("Enter broadcast message (end with '.' on a line by itself):")
-		rl := s.newRL()
-		var lines []string
-		for {
-			line, err := rl.ReadLine("")
-			if err != nil || line == "." {
-				break
-			}
-			lines = append(lines, line)
-		}
-		message = strings.Join(lines, "\n")
+		message = readBody(s, "Enter broadcast message (end with '.' on a line by itself):")
 	}
 	if message == "" {
 		return nil
 	}
+	message = sanitizeMessage(message)
 
 	entries := s.hub.List()
 	sent := 0

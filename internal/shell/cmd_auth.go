@@ -2,6 +2,7 @@ package shell
 
 import (
 	"github.com/ilioscio/alternate.sh/internal/db"
+	"github.com/ilioscio/alternate.sh/internal/valid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -40,8 +41,8 @@ func cmdPasswd(s *Session, _ []string) error {
 		s.Println("passwd: passwords do not match")
 		return nil
 	}
-	if len(newPass) < 8 {
-		s.Println("passwd: password must be at least 8 characters")
+	if err := valid.ValidatePassword(newPass); err != nil {
+		s.Printf("passwd: %s\r\n", err)
 		return nil
 	}
 

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"text/template"
+	"html/template"
 
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,6 +22,9 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
+	// Any origin may open the socket, but /ws requires a session token that a
+	// cross-origin attacker page cannot read (it lives in localStorage, not a
+	// cookie), so there is no CSRF vector to gate here.
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
@@ -79,6 +82,7 @@ func (s *WebSocketServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
@@ -229,11 +233,9 @@ func (s *WebSocketServer) handlePublicPage(w http.ResponseWriter, r *http.Reques
 
 	content, err := db.GetPublicPage(r.Context(), s.pool, username)
 	if err != nil {
-		if err == db.ErrNotFound {
-			http.Error(w, "user not found", http.StatusNotFound)
-		} else {
-			http.Error(w, "no public page set", http.StatusNotFound)
-		}
+		// Single generic 404 for both "no such user" and "no page set" so the
+		// endpoint isn't an account-enumeration oracle.
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 

@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ilioscio/alternate.sh/internal/valid"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -82,6 +84,9 @@ func GetUserByID(ctx context.Context, pool *pgxpool.Pool, id string) (*User, err
 }
 
 func CreateUser(ctx context.Context, pool *pgxpool.Pool, username, passwordHash, displayName string, admin bool) (*User, error) {
+	if err := valid.ValidateUsername(username); err != nil {
+		return nil, err
+	}
 	row := pool.QueryRow(ctx, `
 		INSERT INTO users (username, password_hash, display_name, admin)
 		VALUES ($1, $2, $3, $4)

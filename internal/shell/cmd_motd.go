@@ -58,17 +58,7 @@ func cmdMsgs(s *Session, args []string) error {
 }
 
 func motdSet(s *Session) error {
-	s.Println("Enter new MOTD (end with '.' on a line by itself):")
-	rl := s.newRL()
-	var lines []string
-	for {
-		line, err := rl.ReadLine("")
-		if err != nil || line == "." {
-			break
-		}
-		lines = append(lines, line)
-	}
-	body := strings.Join(lines, "\n")
+	body := readBody(s, "Enter new MOTD (end with '.' on a line by itself):")
 	if err := db.SetMOTD(s.ctx, s.db, body); err != nil {
 		s.Println("error saving MOTD")
 		return nil

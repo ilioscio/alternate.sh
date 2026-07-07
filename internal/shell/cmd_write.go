@@ -1,11 +1,27 @@
 package shell
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/ilioscio/alternate.sh/internal/db"
 	"github.com/ilioscio/alternate.sh/internal/presence"
 )
+
+// sanitizeMessage strips terminal control and escape bytes from text that will
+// be pushed to another user's terminal (write, wall), preventing escape-
+// sequence injection. Newlines and tabs are preserved; everything else below
+// 0x20, plus DEL, is dropped.
+func sanitizeMessage(msg string) string {
+	var b strings.Builder
+	b.Grow(len(msg))
+	for _, r := range msg {
+		if r == '\n' || r == '\t' || (r >= 0x20 && r != 0x7f) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
 
 func cmdWrite(s *Session, args []string) error {
 	if len(args) == 0 {
@@ -43,23 +59,13 @@ func cmdWrite(s *Session, args []string) error {
 	if len(args) > 1 {
 		message = strings.Join(args[1:], " ")
 	} else {
-		// Interactive mode: read until EOF or "."
-		s.Printf("Message to %s (end with '.' on a line by itself or Ctrl+D):\r\n", target)
-		rl := s.newRL()
-		var lines []string
-		for {
-			line, err := rl.ReadLine("")
-			if err != nil || line == "." {
-				break
-			}
-			lines = append(lines, line)
-		}
-		message = strings.Join(lines, "\n")
+		message = readBody(s, fmt.Sprintf("Message to %s (end with '.' on a line by itself or Ctrl+D):", target))
 	}
 
 	if message == "" {
 		return nil
 	}
+	message = sanitizeMessage(message)
 
 	notice := presence.WriteNotice{
 		Kind:    presence.NoticeWrite,

@@ -10,17 +10,38 @@ import (
 	"github.com/ilioscio/alternate.sh/internal/presence"
 )
 
-// readBody reads lines until '.' on its own line or EOF/error.
+// Bounds on interactive multi-line input (mail, articles, plan, public page,
+// MOTD, wall, write). Caps bound server memory against a client that streams
+// input without ever sending the terminating '.'.
+const (
+	maxBodyBytes = 64 * 1024
+	maxBodyLines = 2000
+)
+
+// readBody reads lines until '.' on its own line or EOF/error. Input is capped
+// at maxBodyBytes / maxBodyLines; once a cap is hit, further input is dropped
+// and the user is told, but collection ends cleanly at the next '.'.
 func readBody(s *Session, hint string) string {
 	if hint != "" {
 		s.Println(hint)
 	}
 	rl := s.newRL()
 	var lines []string
+	total := 0
+	truncated := false
 	for {
 		line, err := rl.ReadLine("")
 		if err != nil || line == "." {
 			break
+		}
+		if truncated {
+			continue // keep draining until '.', but store nothing more
+		}
+		total += len(line) + 1
+		if total > maxBodyBytes || len(lines) >= maxBodyLines {
+			s.Println("[input limit reached — further lines ignored; end with '.']")
+			truncated = true
+			continue
 		}
 		lines = append(lines, line)
 	}
