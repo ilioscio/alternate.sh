@@ -96,25 +96,35 @@ func cmdHelp(s *Session, args []string) error {
 
 func helpForCommand(s *Session, cmd string) error {
 	help := map[string]string{
-		"finger":  "finger [user]          — show user info; no arg lists logged-in users",
-		"who":     "who                    — list logged-in users",
-		"w":       "w                      — list users with current activity",
-		"last":    "last [user]            — show login history",
-		"write":   "write <user> [msg]     — send a message to a logged-in user",
-		"mesg":    "mesg [y|n]             — enable/disable incoming messages",
-		"motd":    "motd                   — display message of the day",
-		"msgs":    "msgs [-q]              — read system messages",
-		"fortune": "fortune                — display a random fortune",
-		"plan":    "plan                   — edit your ~/.plan",
-		"project": "project [text]         — set your current project",
-		"public":  "public [user]          — edit or read a public page",
-		"passwd":  "passwd                 — change your password",
-		"chfn":    "chfn                   — change finger information",
-		"wall":    "wall [msg]             — broadcast to all users (admin only)",
-		"clear":   "clear                  — clear the screen",
-		"uptime":  "uptime                 — show server uptime and user count",
-		"logout":  "logout                 — end your session",
-		"help":    "help [cmd]             — show this help or help for a command",
+		"finger":   "finger [user]          — show user info; no arg lists logged-in users",
+		"who":      "who                    — list logged-in users",
+		"w":        "w                      — list users with current activity",
+		"last":     "last [user]            — show login history",
+		"write":    "write <user> [msg]     — send a message to a logged-in user",
+		"mesg":     "mesg [y|n]             — enable/disable incoming messages",
+		"motd":     "motd [set]             — display the message of the day; 'set' edits it (admin)",
+		"msgs":     "msgs [-q]              — read system messages",
+		"fortune":  "fortune                — display a random fortune",
+		"plan":     "plan                   — edit your ~/.plan",
+		"project":  "project [text]         — set your current project",
+		"public":   "public [user]          — edit or read a public page",
+		"passwd":   "passwd                 — change your password",
+		"chfn":     "chfn                   — change finger information",
+		"mail":     "mail [user]            — read your mailbox, or send mail to a user",
+		"vacation": "vacation [on|off|msg]  — manage your vacation auto-reply",
+		"news":     "news                   — browse newsgroups and read articles",
+		"post":     "post [group]           — post an article to a newsgroup",
+		"calendar": "calendar [edit]        — show upcoming events, or edit your calendar",
+		"wall":     "wall [msg]             — broadcast to all users (admin only)",
+		"clear":    "clear                  — clear the screen",
+		"uptime":   "uptime                 — show server uptime and user count",
+		"logout":   "logout                 — end your session",
+		"help":     "help [cmd]             — show this help or help for a command",
+	}
+
+	// Resolve aliases so e.g. 'help rn' works.
+	if canonical, ok := aliases[cmd]; ok {
+		cmd = canonical
 	}
 
 	if h, ok := help[cmd]; ok {

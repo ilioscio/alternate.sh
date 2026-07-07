@@ -90,6 +90,8 @@ pkgs.testers.runNixOSTest {
         cal_date = datetime.now() + timedelta(days=7)
         out = sh("alice", "alicepass123", [
             "help",
+            "help mail",
+            "help rn",
             "who",
             "w",
             "uptime",
@@ -110,6 +112,8 @@ pkgs.testers.runNixOSTest {
             "FORTUNE-CANARY",                        # login fortune
             "alternate.sh — available commands",     # help
             "Type 'help <command>' for details.",
+            "read your mailbox",                     # help mail
+            "browse newsgroups",                     # help rn (alias resolution)
             "USER",                                  # w header
             "user",                                  # uptime
             "mesg: messages are on",
@@ -227,6 +231,22 @@ pkgs.testers.runNixOSTest {
             "news", "alt.chat", "1", "x", "q", "q",
         ])
         expect(out, "NEWS-SUBJ-CANARY", "NEWS-BODY-CANARY")
+
+    with subtest("news: cancel — non-author denied, author succeeds"):
+        out = sh("bob", "bobpass12345", [
+            "news", "alt.chat", "c1", "y", "q", "q",
+        ])
+        expect(out, "cancel: you can only cancel your own articles")
+
+        out = sh("alice", "alicepass123", [
+            "news", "alt.chat", "c1", "y", "q", "q",
+        ])
+        expect(out, "Article cancelled.", "no articles remain.")
+        n = psql(
+            "SELECT count(*) FROM articles a JOIN newsgroups g ON g.id = a.newsgroup_id"
+            " WHERE g.name='alt.chat' AND NOT a.cancelled"
+        )
+        assert n == "0", f"expected 0 live articles in alt.chat, got {n}"
 
     with subtest("post: direct posting to a group"):
         out = sh("alice", "alicepass123", [

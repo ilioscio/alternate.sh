@@ -205,7 +205,7 @@ exactly. Reference for every interactive command:
 | `mail` (mailbox sub-REPL) | any of: number, `d<n>`, `r<n>` (then reply compose: body…, `.`, `y`), `n`, `l`, `q` |
 | `vacation msg` | body lines…, `.` |
 | `vacation on` / `off` | none |
-| `news` (sub-REPL) | group name → article-list sub-REPL: number (then one line consumed by the inline `[f/n/q]` prompt), `f<n>` (compose), `p` (compose: subject, body…, `.`, `y`), `m`, `q` → back at group list → `q` to exit |
+| `news` (sub-REPL) | group name → article-list sub-REPL: number (then one line consumed by the inline `[f/n/q]` prompt), `f<n>` (compose), `c<n>` (cancel: `y`/`n` confirm; author-only unless admin), `p` (compose: subject, body…, `.`, `y`), `m`, `q` → back at group list → `q` to exit |
 | `post <group>` | subject, body lines…, `.`, `y` |
 | `motd set` (admin) | body lines…, `.` |
 | `wall` (admin, no args) | body lines…, `.` |
@@ -243,17 +243,21 @@ changed MOTD, carol's changed password). Current sequence:
 9. **vacation off + delete** — bob disables vacation, deletes message 1.
 10. **news post** — alice posts in `alt.chat` via the browser flow.
 11. **news read** — bob sees the subject in the article list and the body.
-12. **post direct** — alice posts to `alt.dreams.computing`; psql row count.
-13. **write/wall live** — background bob captures `Message from alice` +
+12. **news cancel** — bob (non-author, non-admin) is denied; alice cancels
+    her own article; list reports none remain; psql confirms zero
+    non-cancelled rows. *(Must run after bob's read and before anything
+    that expects the alt.chat article to exist.)*
+13. **post direct** — alice posts to `alt.dreams.computing`; psql row count.
+14. **write/wall live** — background bob captures `Message from alice` +
     canary and `Broadcast from alice` + canary; `write` to offline carol
     fails; `wall` reports `sent to 1 user`.
-14. **mesg persistence** — `mesg n` persists (psql `mesg_on = f`), blocks
+15. **mesg persistence** — `mesg n` persists (psql `mesg_on = f`), blocks
     `write` against a fresh background session, `mesg y` restores. *(This
     subtest exists because `cmdMesg` originally forgot the DB write — the
     setting silently reverted on logout. Regression guard.)*
-15. **passwd** — carol changes her password; new password logs in (prompt
+16. **passwd** — carol changes her password; new password logs in (prompt
     asserted); old password is rejected (nonzero ssh exit).
-16. **last** — shows records for all three users.
+17. **last** — shows records for all three users.
 
 ### Timing notes
 

@@ -88,7 +88,7 @@ func calendarShow(s *Session) error {
 	}
 
 	if len(past) > 0 {
-		s.Printf("\r\nFuther ahead:\r\n")
+		s.Printf("\r\nFurther ahead:\r\n")
 		for _, e := range past {
 			s.Printf("  %-12s  %s\r\n", e.t.Format("Jan 2"), e.desc)
 		}

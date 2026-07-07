@@ -141,7 +141,7 @@ func browseGroup(s *Session, group *db.Newsgroup) {
 	current := -1
 
 	for {
-		s.Print("\r\n[number, f<n>=followup, p=post, m=mark all read, q=quit]\r\n? ")
+		s.Print("\r\n[number, f<n>=followup, c<n>=cancel, p=post, m=mark all read, q=quit]\r\n? ")
 		line, err := rl.ReadLine("")
 		if err != nil {
 			return
@@ -163,6 +163,38 @@ func browseGroup(s *Session, group *db.Newsgroup) {
 				arts[i].Read = true
 			}
 			s.Println("All articles marked as read.")
+
+		case strings.HasPrefix(line, "c"):
+			n, ok := parseNewsNum(strings.TrimSpace(line[1:]), len(arts))
+			if !ok && current >= 0 {
+				n, ok = current+1, true
+			}
+			if !ok {
+				s.Println("Usage: c<number>")
+				break
+			}
+			a := arts[n-1]
+			if !confirm(s, fmt.Sprintf("Cancel article #%s (%s)? [y/n]: ", shortID(a.ID), a.Subject)) {
+				s.Println("Not cancelled.")
+				break
+			}
+			cancelled, err := db.CancelArticle(s.ctx, s.db, a.ID, s.User.ID, s.User.Admin)
+			if err != nil {
+				s.Println("cancel: error cancelling article")
+				break
+			}
+			if !cancelled {
+				s.Println("cancel: you can only cancel your own articles")
+				break
+			}
+			s.Println("Article cancelled.")
+			current = -1
+			arts, _ = db.GetArticles(s.ctx, s.db, group.ID, s.User.ID)
+			if len(arts) == 0 {
+				s.Printf("%s — no articles remain.\r\n", group.Name)
+			} else {
+				printArticleList(s, arts)
+			}
 
 		case strings.HasPrefix(line, "f"):
 			n, ok := parseNewsNum(strings.TrimSpace(line[1:]), len(arts))
