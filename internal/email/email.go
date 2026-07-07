@@ -70,6 +70,10 @@ func (s *Sender) Send(ctx context.Context, to, subject, body string) error {
 		return fmt.Errorf("email: dial %s: %w", addr, err)
 	}
 
+	// secured tracks whether the connection is TLS-protected, so we never send
+	// credentials in the clear.
+	secured := false
+
 	// Implicit TLS (SMTPS/465): wrap the raw connection immediately.
 	if s.cfg.implicitTLS() {
 		tconn := tls.Client(conn, tlsCfg)
@@ -78,6 +82,7 @@ func (s *Sender) Send(ctx context.Context, to, subject, body string) error {
 			return fmt.Errorf("email: TLS handshake: %w", err)
 		}
 		conn = tconn
+		secured = true
 	}
 
 	c, err := smtp.NewClient(conn, s.cfg.Host)
@@ -93,6 +98,7 @@ func (s *Sender) Send(ctx context.Context, to, subject, body string) error {
 			if err := c.StartTLS(tlsCfg); err != nil {
 				return fmt.Errorf("email: STARTTLS: %w", err)
 			}
+			secured = true
 		} else if s.cfg.Username != "" {
 			// Never send credentials over an unencrypted link.
 			return fmt.Errorf("email: server does not support STARTTLS but auth is configured")
@@ -100,12 +106,18 @@ func (s *Sender) Send(ctx context.Context, to, subject, body string) error {
 	}
 
 	if s.cfg.Username != "" {
+		if !secured {
+			return fmt.Errorf("email: refusing to authenticate over an unencrypted connection")
+		}
 		pw, err := s.readPassword()
 		if err != nil {
 			return err
 		}
-		auth := smtp.PlainAuth("", s.cfg.Username, pw, s.cfg.Host)
-		if err := c.Auth(auth); err != nil {
+		// Use our own PLAIN implementation: the stdlib PlainAuth refuses to
+		// send credentials when the smtp.Client doesn't know the link is TLS,
+		// which is exactly the case for implicit-TLS (465) connections handed
+		// to NewClient. We only reach here after establishing TLS ourselves.
+		if err := c.Auth(&plainAuth{username: s.cfg.Username, password: pw}); err != nil {
 			return fmt.Errorf("email: auth: %w", err)
 		}
 	}
@@ -127,6 +139,27 @@ func (s *Sender) Send(ctx context.Context, to, subject, body string) error {
 		return fmt.Errorf("email: close body: %w", err)
 	}
 	return c.Quit()
+}
+
+// plainAuth implements SMTP AUTH PLAIN (RFC 4616) without the standard
+// library's TLS gate. Send only constructs it after TLS is established
+// (implicit or via STARTTLS), so credentials are never exposed in the clear.
+type plainAuth struct {
+	identity string
+	username string
+	password string
+}
+
+func (a *plainAuth) Start(_ *smtp.ServerInfo) (string, []byte, error) {
+	resp := []byte(a.identity + "\x00" + a.username + "\x00" + a.password)
+	return "PLAIN", resp, nil
+}
+
+func (a *plainAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if more {
+		return nil, fmt.Errorf("email: unexpected server challenge during PLAIN auth")
+	}
+	return nil, nil
 }
 
 func (s *Sender) readPassword() (string, error) {

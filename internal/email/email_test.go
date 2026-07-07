@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
+	"net/smtp"
 	"os"
 	"strconv"
 	"strings"
@@ -263,6 +264,28 @@ func TestImplicitTLSAutoForPort465(t *testing.T) {
 	}
 	if !(Config{Port: 587, ImplicitTLS: true}).implicitTLS() {
 		t.Error("explicit ImplicitTLS should win")
+	}
+}
+
+func TestPlainAuthNoTLSGate(t *testing.T) {
+	// Our PLAIN auth must produce credentials even when ServerInfo reports a
+	// non-localhost host with TLS=false — the case where stdlib PlainAuth
+	// refuses, but which is exactly how implicit-TLS (465) connections look to
+	// smtp.Client. Send guards the *call site* on real TLS state instead.
+	a := &plainAuth{username: "noreply@ilios.dev", password: "s3cret"}
+	proto, resp, err := a.Start(&smtp.ServerInfo{Name: "mail.ilios.dev", TLS: false})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if proto != "PLAIN" {
+		t.Errorf("proto = %q, want PLAIN", proto)
+	}
+	if string(resp) != "\x00noreply@ilios.dev\x00s3cret" {
+		t.Errorf("unexpected AUTH PLAIN response: %q", resp)
+	}
+	// A trailing server challenge is a protocol error.
+	if _, err := a.Next([]byte("x"), true); err == nil {
+		t.Error("Next should error on an unexpected challenge")
 	}
 }
 
