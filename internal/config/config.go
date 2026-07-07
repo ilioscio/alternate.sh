@@ -12,6 +12,7 @@ type Config struct {
 	SSH        SSHConfig        `toml:"ssh"`
 	Web        WebConfig        `toml:"web"`
 	Database   DatabaseConfig   `toml:"database"`
+	Email      EmailConfig      `toml:"email"`
 	Federation FederationConfig `toml:"federation"`
 	Limits     LimitsConfig     `toml:"limits"`
 }
@@ -30,6 +31,23 @@ type WebConfig struct {
 	Port    int    `toml:"port"`
 	TLSCert string `toml:"tls_cert"`
 	TLSKey  string `toml:"tls_key"`
+	// PublicURL is the externally reachable base URL, used to build links in
+	// emails (e.g. account-confirmation URLs). No trailing slash.
+	PublicURL string `toml:"public_url"`
+}
+
+// EmailConfig configures transactional email (SMTP submission). Enabled=false
+// disables sending (useful for dev); signup will refuse to run without it.
+type EmailConfig struct {
+	Enabled      bool   `toml:"enabled"`
+	Host         string `toml:"host"`          // SMTP submission host
+	Port         int    `toml:"port"`          // usually 587 (STARTTLS)
+	Username     string `toml:"username"`      // SMTP auth user; empty = no auth (dev catchers)
+	From         string `toml:"from"`          // envelope + header From address
+	FromName     string `toml:"from_name"`     // optional display name
+	PasswordFile string `toml:"password_file"` // path to secret (e.g. agenix); read at send time
+	// SkipTLSVerify disables certificate verification. TEST/localhost only.
+	SkipTLSVerify bool `toml:"skip_tls_verify"`
 }
 
 type DatabaseConfig struct {
@@ -70,6 +88,7 @@ func defaults() *Config {
 		SSH:      SSHConfig{Port: 2222},
 		Web:      WebConfig{Port: 8080},
 		Database: DatabaseConfig{MaxConns: 25},
+		Email:    EmailConfig{Port: 587, From: "noreply@ilios.dev"},
 		Limits:   LimitsConfig{MaxUsers: 500, MailPerHour: 50, NewsPerDay: 20},
 	}
 }
