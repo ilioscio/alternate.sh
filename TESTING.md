@@ -8,7 +8,11 @@ adjusting the tests.
 |---|---|---|---|
 | Go unit tests | `internal/shell/readline_test.go` | `go test ./internal/shell/` | Line-editing correctness against an emulated terminal |
 | Go unit tests | `internal/presence/room_test.go` | `go test ./internal/presence/` | Talk room broker: join/invite/data-routing/leave/teardown semantics |
+| Go unit tests | `internal/valid/valid_test.go` | `go test ./internal/valid/` | Username/password/email validation + disposable-domain blocking |
+| Go unit tests | `internal/email/email_test.go` | `go test ./internal/email/` | SMTP message building (header-injection guard) + full send over a mock sink |
+| Go unit tests | `internal/ratelimit/ratelimit_test.go` | `go test ./internal/ratelimit/` | Sliding-window per-key limiter |
 | NixOS VM integration test | `nix/tests.nix` | `nix build .#checks.x86_64-linux.commands` | Every shell command, end to end, over real SSH with a real PostgreSQL |
+| NixOS VM integration test | `nix/tests-signup.nix` | `nix build .#checks.x86_64-linux.signup` | Web self-signup → email → confirm (code + link) → login, with mailpit as SMTP sink |
 
 Both run as part of `nix flake check` (the VM test on Linux systems only —
 NixOS VM tests cannot run on darwin).
@@ -325,14 +329,48 @@ changed MOTD, carol's changed password). Current sequence:
 
 ---
 
+## Layer 3: signup VM test (`nix/tests-signup.nix`)
+
+A separate VM check (`checks.<system>.signup`) for the public self-signup flow,
+because it needs an SMTP sink and email config the commands test doesn't.
+
+**Mail sink:** `mailpit` is launched in the test script (`--smtp 127.0.0.1:1025
+--listen 127.0.0.1:8025`) and the service is configured with `email.enable`
+pointing at it (no auth, since mailpit is an open sink). The confirmation email
+is read back through mailpit's HTTP API (`/api/v1/search?query=to:<addr>` →
+`/api/v1/message/<id>` → `.Text`), and the 6-digit code / `token=` link are
+regex-extracted from the body to complete confirmation.
+
+**Simulating distinct client IPs:** the handlers derive the client IP from the
+`X-Real-IP` header (set by our nginx in production). The test sends
+`X-Real-IP: 10.0.0.N` per request so each sub-test has an independent rate-limit
+bucket, and the rate-limit sub-test deliberately reuses one IP (`10.9.9.9`) to
+trip the 3-signups/hour cap on the 4th request. **When adding signup sub-tests,
+give each an unused `X-Real-IP` or you'll consume another test's rate budget.**
+
+**Sub-tests:** confirm-by-code + login; confirm-by-link + login; disposable
+email rejected (400); invalid username rejected (400); duplicate username
+rejected (409); per-IP rate limit (4th → 429); wrong-code lockout (5 bad codes
+destroy the pending row, then even the right code 404s).
+
+**Ordering note:** the disposable/invalid sub-tests rely on validation
+happening before the pending row is created, so they leave no state. The
+duplicate-username test depends on the confirm-by-code test having created
+`zoe`.
+
+---
+
 ## Running everything
 
 ```sh
-# Go unit tests (fast, run these on any readline change)
-nix develop --command go test ./internal/shell/ -v
+# Go unit tests (fast, run these on any readline/validation change)
+nix develop --command go test ./... 
 
-# Full integration suite (~2–4 min including VM build)
+# Full command integration suite (~2–4 min including VM build)
 nix build .#checks.x86_64-linux.commands -L
+
+# Signup flow suite
+nix build .#checks.x86_64-linux.signup -L
 
 # Everything the flake knows about
 nix flake check

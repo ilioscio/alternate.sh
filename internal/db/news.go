@@ -129,6 +129,17 @@ func GetArticle(ctx context.Context, pool *pgxpool.Pool, articleID string) (*Art
 	return a, nil
 }
 
+// CountArticlesPostedSince counts articles an author has posted within the
+// given interval (e.g. '24 hours'), for spam rate limiting.
+func CountArticlesPostedSince(ctx context.Context, pool *pgxpool.Pool, authorID, interval string) (int, error) {
+	var n int
+	err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM articles WHERE author_id = $1 AND created_at > NOW() - $2::interval`,
+		authorID, interval,
+	).Scan(&n)
+	return n, err
+}
+
 func PostArticle(ctx context.Context, pool *pgxpool.Pool, groupID, authorID, subject, body string, parentID *string) (*Article, error) {
 	a := &Article{}
 	err := pool.QueryRow(ctx, `

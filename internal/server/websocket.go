@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
-	"html/template"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,7 +18,9 @@ import (
 
 	"github.com/ilioscio/alternate.sh/internal/config"
 	"github.com/ilioscio/alternate.sh/internal/db"
+	"github.com/ilioscio/alternate.sh/internal/email"
 	"github.com/ilioscio/alternate.sh/internal/presence"
+	"github.com/ilioscio/alternate.sh/internal/ratelimit"
 	"github.com/ilioscio/alternate.sh/internal/shell"
 	webstatic "github.com/ilioscio/alternate.sh/web"
 )
@@ -29,18 +33,32 @@ var upgrader = websocket.Upgrader{
 }
 
 type WebSocketServer struct {
-	cfg  *config.Config
-	pool *pgxpool.Pool
-	hub  *presence.Hub
-	mux  *http.ServeMux
+	cfg    *config.Config
+	pool   *pgxpool.Pool
+	hub    *presence.Hub
+	mux    *http.ServeMux
+	email  *email.Sender
+	signup *ratelimit.Limiter
+	login  *ratelimit.Limiter
 }
 
 func NewWebSocket(cfg *config.Config, pool *pgxpool.Pool, hub *presence.Hub) *WebSocketServer {
-	s := &WebSocketServer{cfg: cfg, pool: pool, hub: hub, mux: http.NewServeMux()}
+	s := &WebSocketServer{
+		cfg:    cfg,
+		pool:   pool,
+		hub:    hub,
+		mux:    http.NewServeMux(),
+		email:  email.New(emailConfig(cfg)),
+		signup: ratelimit.New(3, time.Hour),        // 3 signups per IP per hour
+		login:  ratelimit.New(10, 5*time.Minute),   // 10 login attempts per IP / 5 min
+	}
 
-	s.mux.HandleFunc("/api/login",  s.handleLogin)
-	s.mux.HandleFunc("/api/logout", s.handleLogout)
-	s.mux.HandleFunc("/ws",         s.handleWS)
+	s.mux.HandleFunc("/api/login",   s.handleLogin)
+	s.mux.HandleFunc("/api/logout",  s.handleLogout)
+	s.mux.HandleFunc("/api/signup",  s.handleSignup)
+	s.mux.HandleFunc("/api/confirm", s.handleConfirmCode)
+	s.mux.HandleFunc("/confirm",     s.handleConfirmLink)
+	s.mux.HandleFunc("/ws",          s.handleWS)
 	s.mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
@@ -49,6 +67,33 @@ func NewWebSocket(cfg *config.Config, pool *pgxpool.Pool, hub *presence.Hub) *We
 	s.mux.HandleFunc("/", s.handleRoot)
 
 	return s
+}
+
+func emailConfig(cfg *config.Config) email.Config {
+	return email.Config{
+		Enabled:       cfg.Email.Enabled,
+		Host:          cfg.Email.Host,
+		Port:          cfg.Email.Port,
+		Username:      cfg.Email.Username,
+		From:          cfg.Email.From,
+		FromName:      cfg.Email.FromName,
+		ImplicitTLS:   cfg.Email.ImplicitTLS,
+		PasswordFile:  cfg.Email.PasswordFile,
+		SkipTLSVerify: cfg.Email.SkipTLSVerify,
+	}
+}
+
+// clientIP returns the caller's IP, trusting X-Real-IP (set by our own nginx)
+// when present, else the connection's remote address.
+func clientIP(r *http.Request) string {
+	if xr := r.Header.Get("X-Real-IP"); xr != "" {
+		return xr
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func (s *WebSocketServer) ListenAndServe() error {
@@ -79,6 +124,11 @@ type loginResponse struct {
 func (s *WebSocketServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !s.login.Allow(clientIP(r)) {
+		jsonError(w, "too many attempts; please wait a few minutes", http.StatusTooManyRequests)
 		return
 	}
 

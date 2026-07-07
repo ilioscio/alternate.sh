@@ -46,6 +46,9 @@ type EmailConfig struct {
 	From         string `toml:"from"`          // envelope + header From address
 	FromName     string `toml:"from_name"`     // optional display name
 	PasswordFile string `toml:"password_file"` // path to secret (e.g. agenix); read at send time
+	// ImplicitTLS forces SMTPS (TLS from first byte). Auto-assumed for port 465.
+	// Leave false for STARTTLS submission (587).
+	ImplicitTLS bool `toml:"implicit_tls"`
 	// SkipTLSVerify disables certificate verification. TEST/localhost only.
 	SkipTLSVerify bool `toml:"skip_tls_verify"`
 }
@@ -88,7 +91,7 @@ func defaults() *Config {
 		SSH:      SSHConfig{Port: 2222},
 		Web:      WebConfig{Port: 8080},
 		Database: DatabaseConfig{MaxConns: 25},
-		Email:    EmailConfig{Port: 587, From: "noreply@ilios.dev"},
+		Email:    EmailConfig{Port: 465, From: "noreply@ilios.dev"},
 		Limits:   LimitsConfig{MaxUsers: 500, MailPerHour: 50, NewsPerDay: 20},
 	}
 }

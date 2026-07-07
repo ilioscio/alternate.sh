@@ -15,8 +15,20 @@ let
 
     [web]
     port     = ${toString cfg.web.port}
+    public_url = "${cfg.web.publicURL}"
     ${lib.optionalString (cfg.web.tlsCert != "") ''tls_cert = "${cfg.web.tlsCert}"''}
     ${lib.optionalString (cfg.web.tlsKey  != "") ''tls_key  = "${cfg.web.tlsKey}"''}
+
+    [email]
+    enabled       = ${if cfg.email.enable then "true" else "false"}
+    host          = "${cfg.email.host}"
+    port          = ${toString cfg.email.port}
+    username      = "${cfg.email.username}"
+    from          = "${cfg.email.from}"
+    from_name     = "${cfg.email.fromName}"
+    password_file = "${cfg.email.passwordFile}"
+    implicit_tls  = ${if cfg.email.implicitTLS then "true" else "false"}
+    skip_tls_verify = ${if cfg.email.skipTLSVerify then "true" else "false"}
 
     [database]
     dsn = "${
@@ -87,6 +99,62 @@ in {
         type = lib.types.str;
         default = "";
         description = "Path to TLS private key.";
+      };
+      publicURL = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "Externally reachable base URL (no trailing slash), used to build confirmation links in emails, e.g. https://alternate.sh";
+        example = "https://alternate.sh";
+      };
+    };
+
+    email = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Enable transactional email (required for public self-signup).";
+      };
+      host = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "SMTP submission host.";
+        example = "mail.ilios.dev";
+      };
+      port = lib.mkOption {
+        type = lib.types.port;
+        default = 465;
+        description = "SMTP submission port. 465 = implicit TLS (auto-detected); 587 = STARTTLS.";
+      };
+      implicitTLS = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Force implicit TLS (SMTPS). Auto-assumed for port 465; set for non-standard implicit-TLS ports.";
+      };
+      username = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "SMTP auth username. Empty disables auth (localhost catchers only).";
+      };
+      from = lib.mkOption {
+        type = lib.types.str;
+        default = "noreply@ilios.dev";
+        description = "Envelope/header From address for transactional mail.";
+      };
+      fromName = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "Optional display name for the From header.";
+      };
+      passwordFile = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "Path to a file containing the SMTP password (e.g. an agenix secret). Read at send time.";
+        example = "/run/agenix/alternate-sh-smtp-password";
+      };
+      skipTLSVerify = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Disable TLS certificate verification (TEST/localhost only).";
       };
     };
 

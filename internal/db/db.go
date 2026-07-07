@@ -46,6 +46,7 @@ func StartJanitor(ctx context.Context, pool *pgxpool.Pool) {
 			select {
 			case <-ticker.C:
 				pool.Exec(ctx, `DELETE FROM sessions WHERE expires_at < NOW()`)
+				CleanupExpiredPending(ctx, pool)
 			case <-ctx.Done():
 				return
 			}

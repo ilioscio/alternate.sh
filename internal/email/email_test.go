@@ -3,12 +3,23 @@ package email
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"math/big"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+func writeFile(path, content string) error {
+	return os.WriteFile(path, []byte(content), 0600)
+}
 
 func TestBuildMessageHeaders(t *testing.T) {
 	msg, err := buildMessage("noreply@ilios.dev", "alternate.sh", "user@example.com", "Confirm your account", "Hello\nWorld")
@@ -52,11 +63,13 @@ func TestBuildMessageNoFromName(t *testing.T) {
 	}
 }
 
-// mockSMTP is a minimal plaintext SMTP sink (no STARTTLS, no auth) used to
-// exercise the full Send conversation. It records the DATA payload.
+// mockSMTP is a minimal SMTP sink used to exercise the full Send conversation.
+// It records the DATA payload and, when tls is true, serves over implicit TLS
+// and accepts AUTH (answering 235), so the 465 + auth path can be tested.
 type mockSMTP struct {
 	ln       net.Listener
 	received chan string
+	authSeen chan bool
 }
 
 func newMockSMTP(t *testing.T) *mockSMTP {
@@ -65,9 +78,42 @@ func newMockSMTP(t *testing.T) *mockSMTP {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := &mockSMTP{ln: ln, received: make(chan string, 1)}
+	m := &mockSMTP{ln: ln, received: make(chan string, 1), authSeen: make(chan bool, 1)}
 	go m.serve()
 	return m
+}
+
+func newMockSMTPTLS(t *testing.T) *mockSMTP {
+	t.Helper()
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln := tls.NewListener(raw, &tls.Config{Certificates: []tls.Certificate{selfSignedCert(t)}})
+	m := &mockSMTP{ln: ln, received: make(chan string, 1), authSeen: make(chan bool, 1)}
+	go m.serve()
+	return m
+}
+
+func selfSignedCert(t *testing.T) tls.Certificate {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "127.0.0.1"},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(time.Hour),
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:     []string{"localhost"},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: priv}
 }
 
 func (m *mockSMTP) addr() (host string, port string) {
@@ -107,8 +153,16 @@ func (m *mockSMTP) serve() {
 		cmd := strings.ToUpper(strings.TrimSpace(line))
 		switch {
 		case strings.HasPrefix(cmd, "EHLO"), strings.HasPrefix(cmd, "HELO"):
-			// Advertise no extensions (no STARTTLS) — sink is plaintext/no-auth.
-			write("250 mock\r\n")
+			// Advertise AUTH PLAIN (no STARTTLS — this sink is either plaintext
+			// or already wrapped in implicit TLS).
+			write("250-mock\r\n")
+			write("250 AUTH PLAIN\r\n")
+		case strings.HasPrefix(cmd, "AUTH"):
+			select {
+			case m.authSeen <- true:
+			default:
+			}
+			write("235 2.7.0 Authentication successful\r\n")
 		case strings.HasPrefix(cmd, "MAIL FROM"):
 			write("250 OK\r\n")
 		case strings.HasPrefix(cmd, "RCPT TO"):
@@ -154,6 +208,61 @@ func TestSendOverMockSMTP(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for message at sink")
+	}
+}
+
+func TestSendImplicitTLSWithAuth(t *testing.T) {
+	// The production path: SMTPS (implicit TLS) on 465 with PLAIN auth.
+	m := newMockSMTPTLS(t)
+	host, port := m.addr()
+	portNum, _ := strconv.Atoi(port)
+
+	pwFile := t.TempDir() + "/pw"
+	if err := writeFile(pwFile, "s3cret\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := New(Config{
+		Enabled:       true,
+		Host:          host,
+		Port:          portNum,
+		Username:      "noreply@ilios.dev",
+		From:          "noreply@ilios.dev",
+		ImplicitTLS:   true,
+		PasswordFile:  pwFile,
+		SkipTLSVerify: true,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.Send(ctx, "user@example.com", "Hi", "over TLS"); err != nil {
+		t.Fatalf("Send over implicit TLS: %v", err)
+	}
+
+	select {
+	case <-m.authSeen:
+	case <-time.After(3 * time.Second):
+		t.Fatal("server never saw AUTH")
+	}
+	select {
+	case got := <-m.received:
+		if !strings.Contains(got, "over TLS") {
+			t.Errorf("unexpected message:\n%s", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for message")
+	}
+}
+
+func TestImplicitTLSAutoForPort465(t *testing.T) {
+	if !(Config{Port: 465}).implicitTLS() {
+		t.Error("port 465 should imply implicit TLS")
+	}
+	if (Config{Port: 587}).implicitTLS() {
+		t.Error("port 587 should not imply implicit TLS")
+	}
+	if !(Config{Port: 587, ImplicitTLS: true}).implicitTLS() {
+		t.Error("explicit ImplicitTLS should win")
 	}
 }
 

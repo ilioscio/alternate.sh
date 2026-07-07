@@ -18,15 +18,22 @@ import (
 )
 
 type Config struct {
-	Enabled       bool
-	Host          string
-	Port          int
-	Username      string // empty → no AUTH (dev/localhost catchers)
-	From          string
-	FromName      string
+	Enabled  bool
+	Host     string
+	Port     int
+	Username string // empty → no AUTH (dev/localhost catchers)
+	From     string
+	FromName string
+	// ImplicitTLS forces implicit TLS (SMTPS, connection is TLS from the first
+	// byte). It is also assumed automatically for port 465. When false and not
+	// port 465, submission uses STARTTLS (typically port 587).
+	ImplicitTLS   bool
 	PasswordFile  string
 	SkipTLSVerify bool // TEST/localhost only
 }
+
+// implicitTLS reports whether this config should connect with implicit TLS.
+func (c Config) implicitTLS() bool { return c.ImplicitTLS || c.Port == 465 }
 
 type Sender struct {
 	cfg Config
@@ -53,11 +60,24 @@ func (s *Sender) Send(ctx context.Context, to, subject, body string) error {
 	}
 
 	addr := net.JoinHostPort(s.cfg.Host, fmt.Sprintf("%d", s.cfg.Port))
+	tlsCfg := &tls.Config{
+		ServerName:         s.cfg.Host,
+		InsecureSkipVerify: s.cfg.SkipTLSVerify,
+	}
 
-	dialer := &net.Dialer{}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("email: dial %s: %w", addr, err)
+	}
+
+	// Implicit TLS (SMTPS/465): wrap the raw connection immediately.
+	if s.cfg.implicitTLS() {
+		tconn := tls.Client(conn, tlsCfg)
+		if err := tconn.HandshakeContext(ctx); err != nil {
+			conn.Close()
+			return fmt.Errorf("email: TLS handshake: %w", err)
+		}
+		conn = tconn
 	}
 
 	c, err := smtp.NewClient(conn, s.cfg.Host)
@@ -67,17 +87,16 @@ func (s *Sender) Send(ctx context.Context, to, subject, body string) error {
 	}
 	defer c.Close()
 
-	if ok, _ := c.Extension("STARTTLS"); ok {
-		tlsCfg := &tls.Config{
-			ServerName:         s.cfg.Host,
-			InsecureSkipVerify: s.cfg.SkipTLSVerify,
+	// STARTTLS path (typically 587): upgrade after the greeting.
+	if !s.cfg.implicitTLS() {
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			if err := c.StartTLS(tlsCfg); err != nil {
+				return fmt.Errorf("email: STARTTLS: %w", err)
+			}
+		} else if s.cfg.Username != "" {
+			// Never send credentials over an unencrypted link.
+			return fmt.Errorf("email: server does not support STARTTLS but auth is configured")
 		}
-		if err := c.StartTLS(tlsCfg); err != nil {
-			return fmt.Errorf("email: STARTTLS: %w", err)
-		}
-	} else if s.cfg.Username != "" {
-		// Never send credentials over an unencrypted link.
-		return fmt.Errorf("email: server does not support STARTTLS but auth is configured")
 	}
 
 	if s.cfg.Username != "" {

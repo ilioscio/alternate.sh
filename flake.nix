@@ -71,6 +71,12 @@
             package = self.packages.${system}.default;
             module  = nixosModule;
           };
+          # Public self-signup flow (uses mailpit as an SMTP sink).
+          signup = import ./nix/tests-signup.nix {
+            inherit pkgs;
+            package = self.packages.${system}.default;
+            module  = nixosModule;
+          };
         };
       }
     ) // {

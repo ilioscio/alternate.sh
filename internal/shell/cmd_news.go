@@ -304,6 +304,15 @@ func postArticle(s *Session, group *db.Newsgroup, parentID *string, subject stri
 		return
 	}
 
+	// Anti-spam: cap articles per day for non-admins.
+	if !s.User.Admin && s.cfg.Limits.NewsPerDay > 0 {
+		n, _ := db.CountArticlesPostedSince(s.ctx, s.db, s.User.ID, "24 hours")
+		if n >= s.cfg.Limits.NewsPerDay {
+			s.Printf("post: daily posting limit reached (%d/day). Try again tomorrow.\r\n", s.cfg.Limits.NewsPerDay)
+			return
+		}
+	}
+
 	s.Printf("Posting to: %s\r\n", group.Name)
 
 	if subject == "" {

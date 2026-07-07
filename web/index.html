@@ -155,16 +155,44 @@ html, body {
   box-shadow: 0 1px 0 var(--fg);
 }
 
-#login-error {
+#login-error, #signup-error, #confirm-error {
   font-size: 0.75rem;
   color: var(--fg-dim);
   min-height: 1.2em;
   margin-bottom: 0.5rem;
   padding-left: 6rem;
 }
-#login-error:not(:empty)::before {
+#login-error:not(:empty)::before,
+#signup-error:not(:empty)::before,
+#confirm-error:not(:empty)::before {
   content: '! ';
 }
+#signup-error.ok, #confirm-error.ok { color: var(--fg); }
+#signup-error.ok::before, #confirm-error.ok::before { content: ''; }
+
+.dlg-alt {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--fg-dim);
+  margin-top: 0.6rem;
+}
+.dlg-note {
+  font-size: 0.75rem;
+  color: var(--fg-dim);
+  padding: 0 1.5rem 0.5rem;
+  line-height: 1.4;
+}
+.linklike {
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  padding: 0;
+}
+.linklike:hover { text-shadow: var(--glow-text); }
 
 .dlg-submit {
   text-align: center;
@@ -383,7 +411,50 @@ html, body {
       <div class="dlg-submit">
         <button type="submit" id="login-btn">[ connect ]</button>
       </div>
+      <div class="dlg-alt">
+        no account? <button type="button" class="linklike" id="show-signup">[ register ]</button>
+      </div>
     </form>
+
+    <!-- Signup form (hidden until 'register') -->
+    <form class="dlg-body" id="signup-form" autocomplete="on" hidden>
+      <div class="field">
+        <label for="inp-su-user">login:</label>
+        <input type="text" id="inp-su-user" name="username" autocomplete="username" spellcheck="false" maxlength="32">
+      </div>
+      <div class="field">
+        <label for="inp-su-email">email:</label>
+        <input type="email" id="inp-su-email" name="email" autocomplete="email" spellcheck="false" maxlength="254">
+      </div>
+      <div class="field">
+        <label for="inp-su-pass">password:</label>
+        <input type="password" id="inp-su-pass" name="password" autocomplete="new-password" minlength="8" maxlength="128">
+      </div>
+      <div id="signup-error" aria-live="polite"></div>
+      <div class="dlg-submit">
+        <button type="submit" id="signup-btn">[ create account ]</button>
+      </div>
+      <div class="dlg-alt">
+        <button type="button" class="linklike" id="signup-back">[ back to login ]</button>
+      </div>
+    </form>
+
+    <!-- Code confirmation (hidden until a signup is submitted) -->
+    <form class="dlg-body" id="confirm-form" autocomplete="off" hidden>
+      <p class="dlg-note">Check your email for a confirmation link or code.</p>
+      <div class="field">
+        <label for="inp-cf-code">code:</label>
+        <input type="text" id="inp-cf-code" name="code" inputmode="numeric" spellcheck="false" maxlength="6" autocomplete="one-time-code">
+      </div>
+      <div id="confirm-error" aria-live="polite"></div>
+      <div class="dlg-submit">
+        <button type="submit" id="confirm-btn">[ confirm ]</button>
+      </div>
+      <div class="dlg-alt">
+        <button type="button" class="linklike" id="confirm-back">[ back to login ]</button>
+      </div>
+    </form>
+
     <hr class="dlg-divider">
     <div class="dlg-prefs">
       <span class="pref-label">theme:</span>
@@ -566,6 +637,7 @@ function showLogin() {
   inpPass.value = '';
   loginError.textContent = '';
   loginBtn.disabled = false;
+  showForm('login');
   inpUser.focus();
   if (term) { term.dispose(); term = null; }
 }
@@ -625,6 +697,101 @@ loginForm.addEventListener('submit', async e => {
   } catch (err) {
     loginError.textContent = 'network error — check your connection';
     loginBtn.disabled = false;
+  }
+});
+
+// ── Signup flow ──────────────────────────────────────────────────────────────
+const signupForm  = document.getElementById('signup-form');
+const confirmForm = document.getElementById('confirm-form');
+const suUser  = document.getElementById('inp-su-user');
+const suEmail = document.getElementById('inp-su-email');
+const suPass  = document.getElementById('inp-su-pass');
+const suError = document.getElementById('signup-error');
+const suBtn   = document.getElementById('signup-btn');
+const cfCode  = document.getElementById('inp-cf-code');
+const cfError = document.getElementById('confirm-error');
+const cfBtn   = document.getElementById('confirm-btn');
+
+// The username a pending confirmation belongs to.
+let pendingUser = '';
+
+function showForm(which) {
+  loginForm.hidden   = which !== 'login';
+  signupForm.hidden  = which !== 'signup';
+  confirmForm.hidden = which !== 'confirm';
+  loginError.textContent = '';
+  suError.textContent = ''; suError.className = '';
+  cfError.textContent = ''; cfError.className = '';
+}
+
+document.getElementById('show-signup').addEventListener('click', () => {
+  showForm('signup'); suUser.focus();
+});
+document.getElementById('signup-back').addEventListener('click', () => {
+  showForm('login'); inpUser.focus();
+});
+document.getElementById('confirm-back').addEventListener('click', () => {
+  showForm('login'); inpUser.focus();
+});
+
+signupForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  suError.textContent = ''; suError.className = '';
+  suBtn.disabled = true;
+  try {
+    const res = await fetch('/api/signup', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({
+        username: suUser.value.trim(),
+        email:    suEmail.value.trim(),
+        password: suPass.value,
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      suError.textContent = body.error || 'signup failed — try again';
+      suBtn.disabled = false;
+      return;
+    }
+    // Pending: move to code entry.
+    pendingUser = suUser.value.trim();
+    suBtn.disabled = false;
+    showForm('confirm');
+    cfError.textContent = 'Check your email for a link or code.';
+    cfError.className = 'ok';
+    cfCode.focus();
+  } catch (err) {
+    suError.textContent = 'network error — check your connection';
+    suBtn.disabled = false;
+  }
+});
+
+confirmForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  cfError.textContent = ''; cfError.className = '';
+  cfBtn.disabled = true;
+  try {
+    const res = await fetch('/api/confirm', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({ username: pendingUser, code: cfCode.value.trim() }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      cfError.textContent = body.error || 'confirmation failed';
+      cfBtn.disabled = false;
+      return;
+    }
+    // Confirmed: back to login, prefilled.
+    cfBtn.disabled = false;
+    showForm('login');
+    inpUser.value = pendingUser;
+    loginError.textContent = 'Account confirmed — please log in.';
+    inpPass.focus();
+  } catch (err) {
+    cfError.textContent = 'network error — check your connection';
+    cfBtn.disabled = false;
   }
 });
 

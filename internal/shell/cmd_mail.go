@@ -208,6 +208,15 @@ func showMessage(s *Session, m *db.MailMessage) {
 }
 
 func composeMail(s *Session, recipientName, subject string, inReplyTo *string) error {
+	// Anti-spam: cap messages per hour for non-admins.
+	if !s.User.Admin && s.cfg.Limits.MailPerHour > 0 {
+		n, _ := db.CountMailSentSince(s.ctx, s.db, s.User.ID, "1 hour")
+		if n >= s.cfg.Limits.MailPerHour {
+			s.Printf("mail: hourly send limit reached (%d/hour). Try again later.\r\n", s.cfg.Limits.MailPerHour)
+			return nil
+		}
+	}
+
 	// Look up recipient
 	u, err := db.GetUserByUsername(s.ctx, s.db, recipientName)
 	if err != nil {

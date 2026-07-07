@@ -21,6 +21,17 @@ type MailMessage struct {
 	CreatedAt   time.Time
 }
 
+// CountMailSentSince counts messages a user has sent within the given
+// interval (e.g. '1 hour'), for spam rate limiting.
+func CountMailSentSince(ctx context.Context, pool *pgxpool.Pool, senderID, interval string) (int, error) {
+	var n int
+	err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM mail WHERE sender_id = $1 AND created_at > NOW() - $2::interval`,
+		senderID, interval,
+	).Scan(&n)
+	return n, err
+}
+
 func SendMail(ctx context.Context, pool *pgxpool.Pool, senderID, recipientID, subject, body string, inReplyTo *string) (*MailMessage, error) {
 	m := &MailMessage{}
 	err := pool.QueryRow(ctx, `
