@@ -79,7 +79,12 @@ func (s *WebSocketServer) handleSignup(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, db.ErrUsernameTaken):
 			jsonError(w, "that username is taken", http.StatusConflict)
 		case errors.Is(err, db.ErrEmailTaken):
-			// Don't reveal that the email exists; look like success.
+			// Don't reveal that the email exists in the API response. Instead
+			// notify the real owner at that address — an attacker probing
+			// someone else's email never receives this, so enumeration is still
+			// prevented. Best-effort and synchronous so response timing stays
+			// close to the normal (email-sending) path.
+			s.sendAlreadyRegistered(r.Context(), emailAddr)
 			writeJSON(w, http.StatusOK, map[string]string{
 				"status":  "pending",
 				"message": "Check your email to confirm your account.",
@@ -165,6 +170,26 @@ func (s *WebSocketServer) sendConfirmation(ctx context.Context, to, username, co
 	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	return s.email.Send(cctx, to, subject, body)
+}
+
+// sendAlreadyRegistered tells the owner of an already-registered address that
+// someone attempted to sign up with it. It is best-effort: send errors are
+// ignored so the caller's response never reveals whether the email exists.
+func (s *WebSocketServer) sendAlreadyRegistered(ctx context.Context, to string) {
+	brand := s.cfg.Server.Hostname
+	subject := fmt.Sprintf("You already have a %s account", brand)
+	body := fmt.Sprintf(
+		"Someone just tried to sign up for %s using this email address, "+
+			"but it already has an account.\n\n"+
+			"If this was you: no new account was created — just log in with your "+
+			"existing username. If you've forgotten your login, contact an admin.\n\n"+
+			"If this wasn't you, you can safely ignore this message.\n",
+		brand,
+	)
+
+	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	s.email.Send(cctx, to, subject, body)
 }
 
 // numericCode returns a cryptographically random n-digit decimal string.

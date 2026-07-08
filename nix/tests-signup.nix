@@ -130,6 +130,20 @@ pkgs.testers.runNixOSTest {
                          data={"username": "zoe", "email": "other@example.com", "password": "another123"})
         assert code == "409", f"expected 409, got {code}: {body}"
 
+    with subtest("already-registered email: generic success + owner notified, no account created"):
+        # zoe@example.com is a confirmed account (from the code-confirm subtest).
+        code, body = api("/api/signup", ip="10.0.0.7",
+                         data={"username": "zoealt", "email": "zoe@example.com", "password": "zoealt12345"})
+        # Response must NOT reveal that the email is taken.
+        assert code == "200", f"expected generic 200, got {code}: {body}"
+        assert "pending" in body
+        # The real owner gets a heads-up (newest message to that address).
+        text = mail_text("zoe@example.com")
+        assert "no new account was created" in text.lower(), f"owner not notified:\n{text}"
+        # And no account named zoealt was actually created.
+        code, _ = api("/api/login", data={"username": "zoealt", "password": "zoealt12345"})
+        assert code == "401", f"zoealt should not exist, got {code}"
+
     with subtest("per-IP signup rate limit (3/hour)"):
         ip = "10.9.9.9"
         for i in range(3):
