@@ -41,10 +41,57 @@ func NewFederation(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, 
 
 	src := &fedSource{ctx: ctx, pool: pool, hub: hub}
 	srv := federation.NewServer(node, src, secretFor, tlsCfg)
+	srv.OnTalkOpen = func(peerNode string, req federation.TalkOpenRequest, ac *assp.Conn) {
+		handleIncomingTalk(hub, peerNode, req, ac)
+	}
 	return &FederationServer{
 		addr: fmt.Sprintf(":%d", cfg.Federation.ASSPPort),
 		srv:  srv,
 	}, nil
+}
+
+// handleIncomingTalk sets up the receiving side of a cross-node talk: it
+// verifies the target is reachable, creates a local relay room with a
+// stand-in member for the remote user, notifies the target, accepts, and
+// bridges the connection to the room until the talk ends.
+func handleIncomingTalk(hub *presence.Hub, peerNode string, req federation.TalkOpenRequest, ac *assp.Conn) {
+	target := req.Target
+	fromQualified := req.From + "@" + peerNode
+
+	// Target must be online with messages enabled.
+	available := false
+	for _, e := range hub.FindByUsername(target) {
+		if e.MesgOn {
+			available = true
+			break
+		}
+	}
+	if !available {
+		federation.WriteResponse(ac, federation.TalkOpenResponse{Accepted: false, Reason: "user not available"})
+		ac.Close()
+		return
+	}
+
+	participants := []string{target, fromQualified}
+	relaySession := "relay:" + fromQualified + "->" + target
+	pseudo, _, ok := hub.Rooms.Join(participants, relaySession, fromQualified)
+	if !ok {
+		federation.WriteResponse(ac, federation.TalkOpenResponse{Accepted: false, Reason: "could not set up room"})
+		ac.Close()
+		return
+	}
+
+	hub.AddIncomingTalk(target, fromQualified)
+	hub.Send(target, presence.WriteNotice{
+		Kind:    presence.NoticeTalk,
+		From:    fromQualified,
+		Message: "talk request from " + fromQualified + " — respond with: talk " + fromQualified,
+	})
+	federation.WriteResponse(ac, federation.TalkOpenResponse{Accepted: true})
+
+	// Bridge until the talk ends, then clear the pending invitation.
+	federation.RelayRoomToStream(pseudo, ac)
+	hub.RemoveIncomingTalk(target, fromQualified)
 }
 
 func (f *FederationServer) ListenAndServe() error {

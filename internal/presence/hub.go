@@ -44,13 +44,45 @@ type Hub struct {
 
 	// Rooms carries the real-time talk/ytalk byte streams.
 	Rooms *RoomBroker
+
+	// incomingTalk marks pending cross-node talk invitations, keyed by
+	// (localUser, remoteUser@remoteNode). Set by the federation server when a
+	// peer opens a talk; consulted by the talk command so that a user running
+	// `talk remote@node` joins the already-bridged relay room instead of
+	// dialing back out.
+	itMu         sync.Mutex
+	incomingTalk map[string]bool
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		sessions: make(map[string]*Entry),
-		Rooms:    NewRoomBroker(),
+		sessions:     make(map[string]*Entry),
+		Rooms:        NewRoomBroker(),
+		incomingTalk: make(map[string]bool),
 	}
+}
+
+func talkKey(localUser, remote string) string { return localUser + "\x00" + remote }
+
+// AddIncomingTalk records a pending inbound talk invitation.
+func (h *Hub) AddIncomingTalk(localUser, remote string) {
+	h.itMu.Lock()
+	h.incomingTalk[talkKey(localUser, remote)] = true
+	h.itMu.Unlock()
+}
+
+// HasIncomingTalk reports whether a pending inbound talk exists.
+func (h *Hub) HasIncomingTalk(localUser, remote string) bool {
+	h.itMu.Lock()
+	defer h.itMu.Unlock()
+	return h.incomingTalk[talkKey(localUser, remote)]
+}
+
+// RemoveIncomingTalk clears a pending inbound talk (on accept or teardown).
+func (h *Hub) RemoveIncomingTalk(localUser, remote string) {
+	h.itMu.Lock()
+	delete(h.incomingTalk, talkKey(localUser, remote))
+	h.itMu.Unlock()
 }
 
 func (h *Hub) Register(e *Entry) {

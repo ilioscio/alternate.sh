@@ -17,8 +17,13 @@ import (
 // names and lands in the same room. Ctrl+C leaves.
 func cmdTalk(s *Session, args []string) error {
 	if len(args) == 0 {
-		usageError(s, "talk", "<user> [user...]")
+		usageError(s, "talk", "<user[@host]> [user...]")
 		return nil
+	}
+
+	// Cross-node talk: a single "user@host" target routes over federation.
+	if len(args) == 1 && strings.Contains(args[0], "@") {
+		return talkRemote(s, args[0])
 	}
 
 	// Unique peer list, excluding self.

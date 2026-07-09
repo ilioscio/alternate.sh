@@ -12,9 +12,10 @@ const (
 
 // Request is a control-channel query from one node to another.
 type Request struct {
-	ID   uint32 `json:"id"`
-	Verb string `json:"verb"`
-	Arg  string `json:"arg,omitempty"`
+	ID     uint32 `json:"id"`
+	Verb   string `json:"verb"`
+	Arg    string `json:"arg,omitempty"`
+	Target string `json:"target,omitempty"` // used by TALK_OPEN
 }
 
 // PresenceEntry is one logged-in user as reported by a node's WHO.

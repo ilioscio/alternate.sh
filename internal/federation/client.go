@@ -72,6 +72,30 @@ func QueryFinger(ctx context.Context, localNode string, peer Peer, user string) 
 	return resp, err
 }
 
+// InitiateTalk opens a cross-node talk: it dials the peer, sends TALK_OPEN, and
+// on acceptance returns the live connection (dedicated to this talk's stream)
+// for the caller to bridge. On rejection it returns the reason and a nil conn.
+func InitiateTalk(ctx context.Context, localNode string, peer Peer, from, target string) (*assp.Conn, string, error) {
+	ac, err := dial(ctx, localNode, peer)
+	if err != nil {
+		return nil, "", err
+	}
+	var resp TalkOpenResponse
+	if err := request(ac, Request{Verb: VerbTalkOpen, Arg: from, Target: target}, &resp); err != nil {
+		ac.Close()
+		return nil, "", err
+	}
+	if !resp.Accepted {
+		ac.Close()
+		reason := resp.Reason
+		if reason == "" {
+			reason = "declined"
+		}
+		return nil, reason, nil
+	}
+	return ac, "", nil
+}
+
 // request sends a control request and decodes the single response.
 func request(ac *assp.Conn, req Request, out any) error {
 	b, err := json.Marshal(req)

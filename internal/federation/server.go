@@ -17,6 +17,12 @@ type Server struct {
 	src    LocalSource
 	secret assp.SecretFunc
 	tlsCfg *tls.Config
+
+	// OnTalkOpen, if set, handles an inbound cross-node talk. It receives the
+	// authenticated peer node, the request, and the (now dedicated) connection;
+	// it is responsible for responding and for bridging or closing the conn.
+	// The serve loop hands the connection off and stops reading it.
+	OnTalkOpen func(peerNode string, req TalkOpenRequest, ac *assp.Conn)
 }
 
 // NewServer builds a federation server. node is this node's ASSP identity,
@@ -39,15 +45,15 @@ func (s *Server) Serve(ln net.Listener) error {
 }
 
 func (s *Server) handleConn(conn net.Conn) {
-	defer conn.Close()
-
 	tc, ok := conn.(*tls.Conn)
 	if !ok {
+		conn.Close()
 		return
 	}
 	// Bound the handshake; clear the deadline once authenticated.
 	tc.SetDeadline(time.Now().Add(15 * time.Second))
 	if err := tc.Handshake(); err != nil {
+		conn.Close()
 		return
 	}
 	binding := assp.ChannelBinding(tc)
@@ -55,20 +61,24 @@ func (s *Server) handleConn(conn net.Conn) {
 	ac := assp.NewConn(tc)
 	peer, err := assp.Handshake(ac, s.node, s.secret, false, binding)
 	if err != nil {
+		conn.Close()
 		return
 	}
-	_ = peer // authenticated peer node; could be used for authz/logging
 
 	tc.SetDeadline(time.Time{})
-	s.serve(ac)
+	// serve returns true if it handed the connection off (talk relay owns it).
+	if !s.serve(ac, peer) {
+		conn.Close()
+	}
 }
 
-// serve reads control requests until the peer disconnects.
-func (s *Server) serve(ac *assp.Conn) {
+// serve reads control requests until the peer disconnects. It returns true if
+// the connection was handed off to a talk relay (which now owns its lifecycle).
+func (s *Server) serve(ac *assp.Conn, peer string) bool {
 	for {
 		f, err := ac.ReadFrame()
 		if err != nil {
-			return
+			return false
 		}
 		if f.Channel != assp.ControlChannel || f.Type != assp.TypeRequest {
 			continue // ignore stream/unknown frames for now
@@ -77,8 +87,23 @@ func (s *Server) serve(ac *assp.Conn) {
 		if json.Unmarshal(f.Payload, &req) != nil {
 			continue
 		}
+		if req.Verb == VerbTalkOpen {
+			s.handleTalkOpen(ac, peer, req)
+			return true // talk relay (or its rejection) owns the connection now
+		}
 		s.dispatch(ac, req)
 	}
+}
+
+// handleTalkOpen dispatches an inbound talk to OnTalkOpen, or rejects it if
+// talk isn't wired up.
+func (s *Server) handleTalkOpen(ac *assp.Conn, peer string, req Request) {
+	if s.OnTalkOpen == nil {
+		s.respond(ac, req.ID, TalkOpenResponse{Accepted: false, Reason: "talk not available"})
+		ac.Close()
+		return
+	}
+	s.OnTalkOpen(peer, TalkOpenRequest{From: req.Arg, Target: req.Target}, ac)
 }
 
 func (s *Server) dispatch(ac *assp.Conn, req Request) {
