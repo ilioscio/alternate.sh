@@ -673,7 +673,70 @@ alternate.sh/
 
 ---
 
-## 13. Implementation Phases
+## 13. Inline Graphics & the Mobile Terminal
+
+### 13.1 The Premise
+
+Side panels are antithetical to the illusion. A terminal is one surface — a stream of output flowing up the screen — and everything the system shows you should live *inside* that stream. Phase 6's call panel was scaffolding; this phase retires it. The in-universe justification is, delightfully, real history: DEC shipped sixel graphics on the VT340 in 1987. In the alternate timeline where terminals never lost, inline raster graphics in the byte stream are simply how pictures work.
+
+### 13.2 Still Images: Real Sixel in the Stream
+
+Static images are rendered **server-side into sixel escape sequences**, sent as ordinary terminal output. The web client's terminal understands sixel (via renderer support); so does any SSH user running a sixel-capable terminal (foot, WezTerm, xterm) — **SSH users get inline images for free**, which is exactly the kind of dividend authenticity pays. Capability negotiation is the real mechanism: terminals advertise sixel in their Device Attributes response, and clients that lack it get a text placeholder (`[image: sunset.pix — 128×96 — view on web or a sixel terminal]`).
+
+### 13.3 Live Video: Anchored in the Scrollback
+
+Video keeps the Phase-6 codec and media socket — pushing 24fps through sixel encoding would burn 10–40× the bandwidth and abandon the delta coder — but the *rendering* moves inline: the call reserves rows in the scrollback and draws its frames on a canvas anchored to those cells, scrolling with the text like any other output. It looks like sixel; it costs like ASSP. The side panel's buttons become what they always should have been: keystrokes in the terminal (mute, style, hangup live on the in-call key loop that Ctrl+C already inhabits).
+
+### 13.4 The Image Ecosystem
+
+Uploads are **dithered to 1-bit by the client** before they ever leave the user's machine — the browser already carries the blue-noise ditherer (it's the video pipeline's first stage), so a photo becomes a packed 1-bit bitmap + RLE in the codec's own format. The server **verifies** every upload is genuinely that format (clients are never trusted), enforces a **fixed per-user quota** (configurable; 1-bit RLE images are so small that a modest cap holds dozens), and renders to sixel on demand. There is deliberately no way to store a full-color image — the aesthetic is enforced at the wire.
+
+Where images appear:
+- **Mail & news attachments** — attach from the composer; rendered inline for rich clients, placeholder text otherwise. Admins can delete any image (§10.5 applies).
+- **Finger portraits** — a tiny 1-bit portrait (~64×64) on your profile, shown by `finger` on capable clients.
+- **Public pages** — images embedded in `~/public/`, rendered inline and at `/~username`.
+
+### 13.5 The Mobile Terminal
+
+The web client becomes a first-class phone experience without ceasing to be a terminal: responsive layout, touch scrolling and selection, a soft key bar for what phone keyboards lack (Esc, Ctrl, Tab, arrows, Ctrl+C), font scaling, sensible call layout in both orientations, and a PWA manifest so it installs to the home screen. No native APIs — that is Phase 9's job.
+
+---
+
+## 14. Native Clients
+
+A real Flutter/Dart client for Android (iOS-ready by construction, shipped later). Not a WebView: a native app speaking the same wire — the login API, the terminal WebSocket with its JSON control channel, `/ws/call`, and the delegation protocol of §15. Terminal emulation with the same inline-graphics behavior as the web (sixel + anchored video); camera, microphone, and keyboard handled natively.
+
+**Codec parity extends to a third implementation:** Dart twins of the dither/RLE/video/ADPCM codecs, validated byte-for-byte against the *same* committed test vectors that already lock JS to Go. The vectors are the spec; a third consumer strengthens them.
+
+Tooling rides existing, known-good ground: the app builds via a Nix flake modeled on the maintainer's working Flutter example projects, so the fight is the product, not the toolchain. Distribution starts as **direct self-hosted APKs** (fitting the hostable-by-anyone ethos); F-Droid, Play Store, and iOS remain open paths — which means no proprietary dependencies, ever.
+
+---
+
+## 15. The Local Home
+
+### 15.1 The Premise
+
+Every user's home directory grows one special entry: `~/local/`. It looks like part of your account. It is not. **It lives on your own machine** — browser storage on the web, an app directory on Android — and its contents never touch the server, are never shared, and are invisible to every other user. Privacy here isn't a policy, it's physics: the server *cannot* read what it never receives. In-universe, it's the machine on your desk finally talking to the machine downtown.
+
+### 15.2 Storage
+
+- **Web:** OPFS (origin-private file system) — works in every modern browser including Firefox. Explicit `export`/`import` commands move files between `~/local` and the host OS (download/file-picker); on Chromium, a real directory can optionally be mounted via the File System Access API.
+- **Android (Phase 9):** a real app-scoped directory, no compromises.
+- **Non-goals:** no sharing, no server-side backup, no cross-device sync. Your files, your machine, your problem — that's the point.
+
+### 15.3 Server-Delegated Execution
+
+The server's REPL remains the single prompt. When a command touches `~/local` (or is a local-only tool), the server doesn't execute it — it sends a **delegation control message** ("run `vi notes.txt` locally") down the terminal's control channel. The client's toolbox executes against its own filesystem and streams output/UI through the same terminal surface. The server orchestrates the experience but never sees file contents, names beyond the command line, or listings. Over SSH there is no local machine to delegate to: `vi ~/local/...` explains that local files need the web or app client.
+
+### 15.4 The Toolbox
+
+A curated set of **bespoke tools written against a clean VFS interface** over OPFS: `ls`, `cat`, `cp`, `mv`, `rm`, `mkdir`, `grep`, `wc`, `head`, `tail`, `diff` — and `ed`, which is not a joke: it is the editor 1979 actually had, it is small, and it teaches the interaction model everything else builds on. Bespoke beats porting here: compiling busybox/toybox to WASM means WASI shims and fork/exec emulation for tools designed around POSIX processes, and the result integrates worse with our VFS and terminal.
+
+**Phase 10.1 — vi** (its own subphase, as it deserves): evaluate porting a real vi (busybox vi, or a WASI vim build) against growing our own visual editor on the `ed` core — decided when we get there, behind the same VFS, judged on authenticity, size, and integration.
+
+---
+
+## 16. Implementation Phases
 
 ### Phase 1 — Core Shell (MVP) ✅
 SSH server, WebSocket server, user auth, REPL, `finger`, `who`, `w`, `last`, `write`, `mesg`, `motd`, `fortune`, `plan`, `project`, `passwd`, `chfn`, `help`, `logout`. PostgreSQL schema and migrations.
@@ -704,3 +767,15 @@ Two small follow-ups before the games phase: an explicit call decline (`call -r 
 
 ### Phase 7 — Games & Polish ← NEXT
 Door games framework, initial games, community fortune submission, mailing lists, advanced moderation tools.
+
+### Phase 8 — Inline Graphics & the Mobile Terminal
+Retire the call side panel: everything renders inside the terminal stream (§13). Server-side sixel for stills (SSH sixel terminals included, capability-negotiated), cell-anchored inline rendering for call video (keeping the Phase-6 codec), the 1-bit image ecosystem (client-dithered uploads, server-verified format, per-user quota; mail/news attachments, finger portraits, public page images), and a first-class mobile web experience (responsive, touch, soft key bar, PWA).
+
+### Phase 9 — Native Clients
+Flutter/Dart Android app (§14): native terminal + inline graphics parity, Dart codec twins validated against the shared test vectors (third parity implementation), native camera/mic, Nix-flake build based on known-good Flutter tooling. Direct self-hosted APK first; F-Droid/Play/iOS kept viable (no proprietary deps).
+
+### Phase 10 — The Local Home
+`~/local/` — a directory in your home that lives on your own machine (§15): OPFS on web with export/import, real directory on Android, server-delegated execution so the one prompt stays seamless while the server never sees file contents, and a bespoke WASM/JS toolbox (`ls`, `cat`, `grep`, `ed`, …) against a clean VFS.
+
+### Phase 10.1 — vi
+The visual editor for `~/local`, as its own undertaking: evaluate a real vi port (busybox vi / WASI vim) against a bespoke editor grown from `ed`, behind the same VFS.
