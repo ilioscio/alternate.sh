@@ -87,8 +87,9 @@ func cmdHelp(s *Session, args []string) error {
 
 func helpForCommand(s *Session, cmd string) error {
 	help := map[string]string{
-		"finger":   "finger [user]          — show user info; no arg lists logged-in users",
+		"finger":   "finger [user[@host]]   — show user info; @host queries a federated node",
 		"who":      "who                    — list logged-in users",
+		"rwho":     "rwho                   — list logged-in users across all federated nodes",
 		"w":        "w                      — list users with current activity",
 		"last":     "last [user]            — show login history",
 		"write":    "write <user> [msg]     — send a message to a logged-in user",
@@ -109,6 +110,7 @@ func helpForCommand(s *Session, cmd string) error {
 		"post":     "post [group]           — post an article to a newsgroup",
 		"calendar": "calendar [edit]        — show upcoming events, or edit your calendar",
 		"wall":     "wall [msg]             — broadcast to all users (admin only)",
+		"node":     "node [list|add|remove] — manage federation peers (admin only)",
 		"clear":    "clear                  — clear the screen",
 		"uptime":   "uptime                 — show server uptime and user count",
 		"logout":   "logout                 — end your session",

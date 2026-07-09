@@ -61,6 +61,7 @@ func init() {
 	// Register all commands. Handlers are defined in cmd_*.go files.
 	register("finger", cmdFinger)
 	register("who", cmdWho)
+	register("rwho", cmdRwho)
 	register("w", cmdW)
 	register("last", cmdLast)
 	register("write", cmdWrite)
@@ -85,6 +86,7 @@ func init() {
 	register("uptime", cmdUptime)
 	register("logout", cmdLogout, "exit", "quit", "bye")
 	register("wall", cmdWall)
+	register("node", cmdNode)
 }
 
 // printColumns formats items into n columns of equal width.

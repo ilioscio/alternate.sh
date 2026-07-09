@@ -1,8 +1,15 @@
 package assp
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
+	"math/big"
+	"time"
 )
 
 // ChannelBinding derives channel-binding material from an established TLS
@@ -52,4 +59,44 @@ func ClientTLSConfig() *tls.Config {
 		InsecureSkipVerify: true, // node identity is proven by the ASSP handshake
 		MinVersion:         tls.VersionTLS12,
 	}
+}
+
+// SelfSignedConfig returns a server TLS config using a freshly generated,
+// in-memory, self-signed certificate. This is safe for ASSP: node identity is
+// proven by the peering handshake (secret + channel binding), so the cert only
+// needs to establish a TLS channel, not assert identity. Regenerating it every
+// startup is fine — there is no PKI to keep consistent.
+func SelfSignedConfig(commonName string) (*tls.Config, error) {
+	cert, err := generateSelfSigned(commonName)
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}, nil
+}
+
+func generateSelfSigned(commonName string) (tls.Certificate, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	tmpl := x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: commonName},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().AddDate(10, 0, 0),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, nil
 }

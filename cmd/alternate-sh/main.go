@@ -87,9 +87,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	sshSrv := server.NewSSH(cfg, pool, hub)
 	wsSrv := server.NewWebSocket(cfg, pool, hub)
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() { errCh <- sshSrv.ListenAndServe() }()
 	go func() { errCh <- wsSrv.ListenAndServe() }()
+
+	if cfg.Federation.Enabled {
+		fedSrv, err := server.NewFederation(ctx, cfg, pool, hub)
+		if err != nil {
+			return fmt.Errorf("federation: %w", err)
+		}
+		go func() { errCh <- fedSrv.ListenAndServe() }()
+	}
 
 	select {
 	case err := <-errCh:
