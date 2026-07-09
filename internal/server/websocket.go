@@ -2,10 +2,13 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"strings"
@@ -283,10 +286,46 @@ a{color:#33ff33}
 </html>
 `))
 
+// assetETags maps embedded frontend paths to content-hash ETags, computed
+// once at startup. Files in embed.FS carry no modification time, so without
+// this the file server sends no cache validator at all — a browser that
+// cached (or simply kept open) an old frontend would never learn a deploy
+// changed it. no-cache + ETag means every load revalidates cheaply and picks
+// up new code immediately.
+var assetETags = func() map[string]string {
+	etags := make(map[string]string)
+	fs.WalkDir(webstatic.FS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := fs.ReadFile(webstatic.FS, path)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		etags[path] = `"` + hex.EncodeToString(sum[:8]) + `"`
+		return nil
+	})
+	return etags
+}()
+
 func (s *WebSocketServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/~") {
 		s.handlePublicPage(w, r)
 		return
+	}
+
+	name := strings.TrimPrefix(r.URL.Path, "/")
+	if name == "" {
+		name = "index.html"
+	}
+	if etag, ok := assetETags[name]; ok {
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 	}
 	http.FileServerFS(webstatic.FS).ServeHTTP(w, r)
 }
