@@ -80,6 +80,8 @@ type LimitsConfig struct {
 	MaxUsers    int `toml:"max_users"`
 	MailPerHour int `toml:"mail_per_hour"`
 	NewsPerDay  int `toml:"news_per_day"`
+	// TradeTurnsPerDay is the trade game's daily turn budget.
+	TradeTurnsPerDay int `toml:"trade_turns_per_day"`
 }
 
 func Load(path string) (*Config, error) {
@@ -105,6 +107,6 @@ func defaults() *Config {
 		Email:      EmailConfig{Port: 465, From: "noreply@ilios.dev"},
 		Federation: FederationConfig{ASSPPort: 4119},
 		Calls:      CallsConfig{Enabled: true, Width: 128, Height: 96, FPS: 24},
-		Limits:     LimitsConfig{MaxUsers: 500, MailPerHour: 50, NewsPerDay: 20},
+		Limits:     LimitsConfig{MaxUsers: 500, MailPerHour: 50, NewsPerDay: 20, TradeTurnsPerDay: 40},
 	}
 }

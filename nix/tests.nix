@@ -394,5 +394,94 @@ pkgs.testers.runNixOSTest {
     with subtest("last shows login records for multiple users"):
         out = sh("alice", "alicepass123", ["last"])
         expect(out, "alice", "bob", "carol")
+
+    # ── Door games (§5.9) ─────────────────────────────────────────────────────
+    with subtest("games lobby lists the arcade"):
+        out = sh("alice", "alicepass123", ["games"])
+        expect(out, "door games", "chess", "wumpus", "trade", "Hunt the Wumpus", "Star Trade")
+
+    with subtest("wumpus starts, rejects bad moves, quits cleanly"):
+        out = sh("alice", "alicepass123", ["wumpus", "move 99", "q"])
+        expect(out,
+            "HUNT THE WUMPUS",
+            "Tunnels lead to",
+            "No tunnel leads there.",
+        )
+
+    with subtest("chess: challenge, accept, illegal move, real moves, resign"):
+        out = sh("alice", "alicepass123", ["chess", "challenge bob", "q"])
+        expect(out, "Challenge sent to bob (game #")
+        # Colors are a coin flip; pin them so the script is deterministic.
+        psql(
+            "UPDATE chess_games SET"
+            " white_id=(SELECT id FROM users WHERE username='alice'),"
+            " black_id=(SELECT id FROM users WHERE username='bob')"
+        )
+        gid = psql("SELECT id FROM chess_games ORDER BY id DESC LIMIT 1")
+
+        # bob needs mesg back on from the earlier subtest to see notices;
+        # accepting works regardless.
+        out = sh("bob", "bobpass12345", ["chess", f"accept {gid}", "q", "q"])
+        expect(out, f"Game #{gid} is on", "you play black", "waiting")
+
+        out = sh("alice", "alicepass123", [
+            "chess", f"{gid}",
+            "e2e5",       # illegal
+            "e2e4",       # legal
+            "q", "q",
+        ])
+        expect(out,
+            "(white) vs bob (black)",
+            "is not a legal move",
+            "1.e4",
+        )
+
+        out = sh("bob", "bobpass12345", ["chess", f"{gid}", "e7e5", "q", "q"])
+        expect(out, "1.e4 e5")
+
+        out = sh("alice", "alicepass123", ["chess", f"{gid}", "resign", "q"])
+        expect(out, "you lost by resignation")
+        status = psql(f"SELECT status FROM chess_games WHERE id={gid}")
+        assert status == "resigned", f"chess status {status!r}"
+        n = psql("SELECT count(*) FROM game_scores WHERE game='chess' AND kind='win'")
+        assert n == "1", f"expected 1 chess win recorded, got {n}"
+
+    with subtest("trade: universe, deterministic port, buy and guards"):
+        out = sh("alice", "alicepass123", ["trade", "status", "warp 9999", "q"])
+        expect(out,
+            "STAR TRADE",
+            "Sector 1 — warps lead to",
+            "ship's log — alice",
+            "credits  1000",
+            "no warp from 1 to 9999",
+        )
+        n = psql("SELECT count(*) FROM trade_sectors")
+        assert n == "500", f"universe has {n} sectors"
+
+        # The generator never puts a port in sector 1; plant a known one.
+        psql(
+            "INSERT INTO trade_ports (sector_id, name, ore, organics, equipment,"
+            " buys_ore, buys_organics, buys_equipment)"
+            " VALUES (1, 'Test Station', 1000, 500, 500, false, true, true)"
+        )
+        out = sh("alice", "alicepass123", [
+            "trade", "port",
+            "buy ore 5",        # port sells ore at glut price 20
+            "buy org 5",        # port BUYS organics — must refuse
+            "sell eq 1",        # nothing aboard — must refuse
+            "status", "q",
+        ])
+        expect(out,
+            "Test Station",
+            "bought 5 ore at cr 20 each",
+            "buying organics, not selling it",
+            "you don't have that much aboard",
+            "credits  900",
+            "5 ore, 0 organics, 0 equipment",
+        )
+
+    with subtest("games lobby shows the chess leaderboard"):
+        out = sh("alice", "alicepass123", ["games"])
+        expect(out, "bob (1 win)")
   '';
 }

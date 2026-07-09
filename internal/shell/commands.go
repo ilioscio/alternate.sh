@@ -88,6 +88,7 @@ func init() {
 	register("logout", cmdLogout, "exit", "quit", "bye")
 	register("wall", cmdWall)
 	register("node", cmdNode)
+	registerGames()
 }
 
 // printColumns formats items into n columns of equal width.

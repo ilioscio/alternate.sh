@@ -333,14 +333,15 @@ End the session.
 
 ### 5.9 Games (Door Games)
 
-Accessible via `games` or by name directly. These are cooperative/competitive terminal games running on the server, in the tradition of BBS door games.
+Cooperative/competitive terminal games running on the server, in the tradition of BBS door games. `games` shows the lobby — the installed games, who's playing right now (via presence), high scores, and recent activity; each game is also a command in its own right (`chess`, `wumpus`, `trade`).
 
-Initial candidates:
-- A simple multi-player text RPG with persistent state
-- A trading/economy game (TradeWars-inspired)
-- Chess with `write`-based async play and `talk`-based live play
+**The framework.** A game is a Go implementation of a small `Game` interface (name, lobby metadata, and a `Play` entry point receiving a context: the player, terminal I/O, database, a notify hook into the presence system, and a seedable RNG). Games get real, purpose-built Postgres tables — no generic state blobs — plus a shared high-score table the lobby reads. Games are node-local in v1; cross-node play (chess challenges over ASSP) is a natural later step, not built yet.
 
-`games` shows the lobby — active players, high scores, last played.
+**`chess`** — the flagship. Full rules enforced by a bespoke engine (castling, en passant, promotion, check/mate/stalemate, draw by fifty moves / threefold repetition / insufficient material), proven correct by perft tests against the standard published node counts. Challenge any user (`mesg` respected); play is **asynchronous by default** — make your move and log off, your opponent gets a write-style notice ("chess: ilios played Nf3 in game #12") and replies at their leisure — and **live when you're both looking**: two players viewing the same board see moves land instantly. Coordinate move entry (`e2e4`, `e7e8q`, `O-O`), ASCII board with inverse-video dark squares, flipped for black. Resign and draw offers included; no computer opponent in v1 — humans play humans.
+
+**`wumpus`** — Hunt the Wumpus, faithfully 1973: twenty rooms on a dodecahedron, super bats, bottomless pits, five crooked arrows with multi-room flight, and the warnings that made it ("I smell a wumpus!"). Single-player, quick, with a wins leaderboard — the game that proves the lobby plumbing.
+
+**`trade`** — a TradeWars-inspired trading universe, deliberately bounded in v1: a generated sector map with a warp graph, ports dealing in three commodities with prices that drift with stock, a ship with cargo holds and credits, and a daily turn budget that makes visits count. Leaderboard by net worth. **No combat in v1** — piracy and fighters are a future chapter once the economy proves fun.
 
 ---
 
@@ -765,8 +766,11 @@ Cross-node mail (`user@host`) and newsgroup propagation over the ASSP control ch
 ### Phase 6.2 — Federation Polish ✅
 Two small follow-ups before the games phase: an explicit call decline (`call -r <user[@host]>`, usable from SSH since it's pure signaling), and `node add` triggering an immediate news sync + outbox flush instead of waiting for the hourly tick.
 
-### Phase 7 — Games & Polish ← NEXT
-Door games framework, initial games, community fortune submission, mailing lists, advanced moderation tools.
+### Phase 7 — Door Games ✅
+The games framework (§5.9) and its three launch tenants: chess (bespoke perft-proven engine, async + live play), Hunt the Wumpus (1973, faithfully), and the trade economy v1 (sectors, ports, daily turns — no combat yet). Node-local; per-game Postgres tables; lobby with presence and high scores.
+
+### Phase 7.1 — Community Polish ← NEXT
+Community fortune submission, mailing lists, and advanced moderation tools (approval queues for moderated groups, audit surfaces) — split out so the games get undivided attention.
 
 ### Phase 8 — Inline Graphics & the Mobile Terminal
 Retire the call side panel: everything renders inside the terminal stream (§13). Server-side sixel for stills (SSH sixel terminals included, capability-negotiated), cell-anchored inline rendering for call video (keeping the Phase-6 codec), the 1-bit image ecosystem (client-dithered uploads, server-verified format, per-user quota; mail/news attachments, finger portraits, public page images), and a first-class mobile web experience (responsive, touch, soft key bar, PWA).
