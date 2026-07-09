@@ -58,10 +58,10 @@ type DatabaseConfig struct {
 	MaxConns int    `toml:"max_conns"`
 }
 
+// FederationConfig configures node-to-node federation. Everything (presence,
+// finger, mail/news sync, talk relay, future A/V) runs over one ASSP port.
 type FederationConfig struct {
 	ASSPPort int  `toml:"assp_port"`
-	NNTPPort int  `toml:"nntp_port"`
-	SMTPPort int  `toml:"smtp_port"`
 	Enabled  bool `toml:"enabled"`
 }
 
@@ -91,7 +91,8 @@ func defaults() *Config {
 		SSH:      SSHConfig{Port: 2222},
 		Web:      WebConfig{Port: 8080},
 		Database: DatabaseConfig{MaxConns: 25},
-		Email:    EmailConfig{Port: 465, From: "noreply@ilios.dev"},
-		Limits:   LimitsConfig{MaxUsers: 500, MailPerHour: 50, NewsPerDay: 20},
+		Email:      EmailConfig{Port: 465, From: "noreply@ilios.dev"},
+		Federation: FederationConfig{ASSPPort: 4119},
+		Limits:     LimitsConfig{MaxUsers: 500, MailPerHour: 50, NewsPerDay: 20},
 	}
 }

@@ -39,8 +39,6 @@ let
 
     [federation]
     assp_port = ${toString cfg.federation.asspPort}
-    nntp_port = ${toString cfg.federation.nntpPort}
-    smtp_port = ${toString cfg.federation.smtpPort}
     enabled   = ${if cfg.federation.enable then "true" else "false"}
 
     [limits]
@@ -186,17 +184,7 @@ in {
       asspPort = lib.mkOption {
         type = lib.types.port;
         default = 4119;
-        description = "Port for the ASSP (Alternate Shell Server Protocol) federation listener.";
-      };
-      nntpPort = lib.mkOption {
-        type = lib.types.port;
-        default = 119;
-        description = "Port for NNTP news federation.";
-      };
-      smtpPort = lib.mkOption {
-        type = lib.types.port;
-        default = 25;
-        description = "Port for SMTP inter-server mail.";
+        description = "Port for the ASSP (Alternate Shell Server Protocol) federation listener. Presence, finger, and talk relay all run over this one port.";
       };
     };
 
@@ -318,8 +306,6 @@ in {
       [ cfg.ssh.port cfg.web.port ]
       ++ lib.optionals cfg.federation.enable [
         cfg.federation.asspPort
-        cfg.federation.nntpPort
-        cfg.federation.smtpPort
       ]
     );
 

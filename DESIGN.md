@@ -409,65 +409,40 @@ These are strictly cosmetic, applied client-side, and can be disabled.
 
 ### 8.1 Design Philosophy
 
-Servers know about each other through a simple peer registry. Federation is opt-in per server; a node can run fully standalone. Inter-server communication uses minimal, purpose-built protocols where no good standard exists, and existing standards where they fit.
+Servers know about each other through a simple peer registry. Federation is opt-in per server; a node can run fully standalone. Everything federated — presence, finger, mail/news sync, talk relay, and future real-time A/V — runs over a **single purpose-built protocol, ASSP**, on one port (default 4119). We deliberately do *not* run NNTP or SMTP servers: consolidating onto one authenticated protocol gives us one peering/auth model, no public mail/news abuse surface, and a wire format designed for the media features to come. (Interop with real Usenet/standard mail was never a goal for an in-universe alternate network.)
 
-### 8.2 News: NNTP
+### 8.2 ASSP: the federation protocol
 
-Newsgroup federation uses the **Network News Transfer Protocol (RFC 3977)**, the same protocol Usenet ran on. This gives us:
-- Proven, well-understood article propagation
-- Free interop with any NNTP server (Usenet, INN, etc.)
-- Correct handling of article IDs, expiry, and threading
+ASSP is a small multiplexed **binary** protocol over TLS. Every frame is an 8-byte header — `uint32 length | uint16 channel | uint8 type | uint8 flags` — followed by a payload.
 
-Each server runs an NNTP service on port 119 (or 563/TLS). Peer servers exchange articles via the standard NNTP `IHAVE`/`CHECK`/`TAKETHIS` commands.
+- **Channel 0 is control**: request/response JSON (`WHO`, `FINGER`, and later mail/news sync). Low-rate, so clarity beats compactness.
+- **Channels 1+ are independent raw-binary streams**, one per live session. A `talk` session claims a channel today; an audio call or dithered-mono video feed is just another channel tomorrow — same mux, no protocol change.
+- The **`FlagDroppable`** flag lets a sender mark frames it will drop under load (e.g. a stale video frame). Media codecs live entirely above the wire; the transport never needs to know text from audio from video.
 
-Namespace convention: `<nodename>.local` groups stay local; all other groups federate with willing peers.
+**Authentication (peer-only).** All ASSP traffic requires the peering handshake — there is no anonymous access, so a node's user list can't be enumerated by strangers. Both peers prove possession of a shared secret via an HMAC-SHA256 challenge-response binding both nonces, both node names, a direction label (anti-reflection), and **TLS channel-binding material** (RFC 5705 exported keying). The channel binding is what makes self-signed node certificates safe: a man-in-the-middle terminating two separate TLS sessions gets different keying material on each leg, so its relayed proofs won't verify. **Trust is the peering secret + the TLS channel, not a CA** — nodes generate ephemeral self-signed certs at startup and need no PKI.
 
-### 8.3 Mail: SMTP
+### 8.3 Presence & Finger
 
-Inter-server mail uses **SMTP** (RFC 5321), because SMTP is exactly what this is. Local delivery is handled internally; cross-server mail is addressed as `user@hostname` and delivered via standard SMTP with TLS.
+`rwho` aggregates logged-in users across the local node and every peer (control-channel `WHO`). `finger user@host` performs a cross-node lookup (`FINGER`). Unreachable peers are noted, never fatal.
 
-### 8.4 Presence & Finger: Custom Protocol (ASSP)
+### 8.4 Mail & News (planned)
 
-For `rwho`-style cross-server presence and cross-server `finger` lookups, we define a minimal **Alternate Shell Server Protocol (ASSP)** — a simple line-oriented TCP protocol on a dedicated port (default: 4119).
-
-```
-Client: HELLO node.hostname protocol/1.0
-Server: OK alternate.sh/1.0
-
-Client: WHO
-Server: DATA
-Server: ilios pts/0 1720090832 web
-Server: nova pts/1 1720091243 192.168.1.5
-Server: END
-
-Client: FINGER ilios
-Server: DATA
-Server: login: ilios
-Server: name: Ilios Cio
-Server: last_login: 1720090832
-Server: plan: Working on the federation layer.
-Server: END
-
-Client: QUIT
-Server: BYE
-```
-
-ASSP is read-only and unauthenticated for public queries. Write operations (for future federation features) require a shared secret negotiated at peering setup.
+Cross-node mail (`user@host`) and newsgroup propagation will ride the same ASSP control channel as sync operations, reusing the peer registry and auth. Namespace convention: `<nodename>.local` groups stay local; others federate with willing peers.
 
 ### 8.5 Talk: Federated Relay
 
-Cross-server `talk <user@host>` works by having your server open an ASSP connection to the target server and establish a relay channel. Both users' I/O flows through their respective servers; the servers relay bytes between each other. Neither server gives either user direct access to the other's infrastructure.
+Cross-node `talk <user@host>` opens a dedicated ASSP connection to the target's server, negotiates with a `TALK_OPEN` control message, then bridges a local talk "room" to the connection's stream channel on each side. A relay stand-in member represents the remote user in each node's room; bytes typed locally are forwarded to the peer, bytes from the peer are injected into the room. Both users' I/O flows through their own servers — neither gets direct access to the other's infrastructure. **This room-to-stream bridge is the reusable primitive the A/V features will build on**: only the bytes on the wire differ.
 
 ### 8.6 Peering
 
 Admins add peers via:
 ```
-node add <hostname> [--secret <shared-secret>]
-node remove <hostname>
+node add <node> [address]   (prompts for the shared secret, entered hidden)
+node remove <node>
 node list
 ```
 
-Peering is bilateral: both admins must add each other. A node registry is maintained in the DB and checked on startup.
+Peering is bilateral: both admins must add each other with the same secret. The peer registry lives in the DB; secrets are resolved live per handshake.
 
 ---
 

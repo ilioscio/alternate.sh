@@ -77,6 +77,12 @@
             package = self.packages.${system}.default;
             module  = nixosModule;
           };
+          # Two-node federation: peering, cross-node finger/rwho/talk over ASSP.
+          federation = import ./nix/tests-federation.nix {
+            inherit pkgs;
+            package = self.packages.${system}.default;
+            module  = nixosModule;
+          };
         };
       }
     ) // {
