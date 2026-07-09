@@ -269,7 +269,7 @@ Reply to the current article in the same newsgroup.
 **`cancel`**
 Cancel (delete) one of your own articles.
 
-News federation uses NNTP (see §8.2).
+News federation propagates over ASSP (see §8.4).
 
 ---
 
@@ -446,34 +446,99 @@ Peering is bilateral: both admins must add each other with the same secret. The 
 
 ---
 
-## 9. Security Model
+## 9. Retro-Futurism: Live Audio & Video
 
-### 9.1 No Real Shell
+### 9.1 The Premise
+
+Phone calls from an alternate 1979. In our timeline the terminal era ended when Xerox, Apple, and Microsoft ushered in the desktop GUI; here it never did, and real-time media grew *inside* the text-terminal world instead of alongside a windowing system. So alternate.sh grows a voice-and-video layer that looks and sounds like it was invented by people who had timesharing, phosphor CRTs, and 1-bit framebuffers — but not color, not megabits, and not the luxury of wasting cycles.
+
+The guiding thesis: **the lofi aesthetic is not decoration bolted onto a normal video chat — it is the compression strategy.** Every stylistic constraint (no color, low detail, narrowband, dithered) is also the reason the whole thing runs on almost nothing. We lean into 1979's limits precisely because doing so makes the system tiny, fast, and unmistakably itself. "Discord, if it had been built in 1979."
+
+This is the first feature that steps *outside* the terminal emulator. It is **web-only** — it needs a real graphical surface and audio hardware. SSH/text-tier users can't join a call's media; when a call starts they see a text notice ("nova started a video call — join on the web"). This is exactly the fork we anticipated when we kept SSH as the classic text tier rather than removing it: the rich client lives beside xterm.js, not inside it.
+
+### 9.2 Video: 1-bit Dithered Monochrome
+
+Video is **1 bit per pixel** — pure black and white, no grays, no color — at a small resolution (target ~128×96, tunable down to ~96×72) and a **stable 24fps**. The grayscale-to-1-bit conversion is done with a **dither** so the eye reconstructs tone from patterns of dots, the way newsprint halftones or a 1984 Macintosh did.
+
+Dither choice is a real engineering decision, not just a look:
+
+- **Error-diffusion (Floyd–Steinberg)** looks organic per frame but *shimmers* — tiny input changes ripple across the whole frame, so consecutive frames share almost no bits. That shimmer looks alive, but it destroys inter-frame compression.
+- **Ordered / blue-noise dithering** uses a fixed threshold mask, so a static region produces *identical bits every frame*. Blue-noise masks in particular give the grainy, filmic, high-contrast look we want ("high grain black and white") while staying temporally stable.
+
+We choose **blue-noise ordered dithering** as the default: it delivers the intended grain *and* it is what makes the codec cheap, because static regions cost nothing to transmit. (Floyd–Steinberg remains available as a "shimmer" style for those who want it, at higher bitrate.)
+
+The rendered surface is a `<canvas>`, upscaled nearest-neighbor for crisp fat pixels, **tinted to the active phosphor theme** (green/amber/blue/paper/mono) and framed to match the CRT effects — so a call feels like another window on the same imagined machine, not a foreign embed.
+
+### 9.3 Audio: Lofi Intercom Voice
+
+Audio is **narrowband mono, ~8kHz**, deliberately colored to sound like a 1979 intercom / CB radio / long-distance telephone call: a **300–3400 Hz bandpass** (the telephone band), light **bit-crushing**, and a touch of saturation grit. It is not "clean audio, quieter" — it is *characterful* audio, degraded on purpose, in a way that is also extremely cheap to transmit.
+
+### 9.4 The Pipeline
+
+All media is captured, stylized, and **encoded on the client**, streamed as tiny frames to the user's own server, and relayed to the peer — the same server-mediated model as `talk`. Nothing is peer-to-peer; no client ever learns another's IP; there is no WebRTC.
+
+```
+  ┌─ sender (browser) ─────────────┐        ┌─ your server ─┐   ┌─ peer server ─┐   ┌─ receiver (browser) ─┐
+  │ getUserMedia                   │        │               │   │               │   │                      │
+  │  video → downscale → luma      │  WS    │  relay stream │   │  relay stream │   │  decode → 1-bit bitmap│
+  │        → blue-noise dither     │ ─────► │  channel      │──►│  channel      │──►│  → canvas (themed)    │
+  │        → XOR-delta + RLE       │ (bin)  │  (local room  │ASSP  (federated   │WS │  decode → ADPCM → PCM │
+  │  audio → 8kHz → bandpass       │        │   or ASSP)    │   │   talk-style) │   │  → bandpass → speaker │
+  │        → bitcrush → ADPCM      │        │               │   │               │   │                      │
+  └────────────────────────────────┘        └───────────────┘   └───────────────┘   └──────────────────────┘
+```
+
+For a same-node call the server relays browser↔browser directly (like a local talk room); for a cross-node call it rides ASSP exactly like federated talk. **The media stream *is* a room stream** — this reuses the Phase-5 room-to-stream relay wholesale; only the bytes on the wire differ. Audio and video travel on **separate stream channels** so either can be dropped independently (the `FlagDroppable` bit, already in the ASSP frame header, exists for exactly this: a late video frame or audio chunk is discarded rather than queued, because stale realtime media is worthless).
+
+### 9.5 The Codecs (built from the ground up)
+
+Both codecs are bespoke and small enough to read in one sitting — that is the point, and it is feasible *because* the inputs are so constrained.
+
+- **Video codec.** A frame is a 1-bit bitmap. Encoding: periodic **keyframes** (full bitmap, RLE-compressed) plus **delta frames** that XOR against the previous frame and run-length-encode the result. With blue-noise dithering, a still talking head produces near-empty deltas, so a call idles at a few hundred bytes per second and only spends bandwidth on motion. A full 128×96 keyframe is 1,536 bytes before RLE; deltas are typically a fraction of that.
+- **Audio codec.** Narrowband 8kHz mono through a simple **ADPCM-style** 4-bit encoder (~4 KB/s), framed in ~20–40ms chunks. Trivial to implement, tiny on the wire, and the lofi coloring both precedes encoding (shaping the sound) and can be reapplied on playback.
+
+No standard codec is involved. Opus would be "better," but bespoke-and-lofi *is the design*: total control, total legibility, and a sound/look that is ours.
+
+### 9.6 Call Model & Signaling
+
+**v1 is 1:1**, mirroring `talk`. A `CALL_OPEN` control message (analogous to `TALK_OPEN`) negotiates participants, media types (audio, video, or both), and codec parameters (resolution, fps, sample rate). Calls are **offered and accepted interactively**, respect `mesg`/do-not-disturb, and can be declined.
+
+The design is **group-ready**: the room abstraction already supports N members, and media frames carry a per-source identifier so that group calls become a fan-out (the server relays each participant's stream to the others) with the client **tiling video and mixing audio**. Group rooms are a later phase, not a v1 rewrite.
+
+### 9.7 Non-Goals
+
+No color. No HD, ever — low detail is a feature. No WebRTC, no P2P, no TURN. **Nothing is stored**: media is ephemeral and never touches the database, consistent with `talk`. No interoperability with standard videoconferencing — this is an in-universe medium, not a Zoom client.
+
+---
+
+## 10. Security Model
+
+### 10.1 No Real Shell
 
 The REPL provides zero access to the underlying OS. There is no `exec`, no filesystem access, no process spawning. Commands are a closed, enumerated set handled by Go functions.
 
-### 9.2 Authentication
+### 10.2 Authentication
 
 - Password auth: bcrypt, minimum 10 rounds
 - SSH key auth: standard public key authentication via the SSH protocol
 - Web frontend: session token (UUID) stored in browser localStorage, issued on login, expires after configurable idle period
 - No OAuth, no third-party auth providers — in-universe, this system is its own identity provider
 
-### 9.3 Rate Limiting
+### 10.3 Rate Limiting
 
 - Login attempts: 5 failures per minute per IP before 60-second lockout
 - Mail sending: configurable per-hour limit per user
 - News posting: configurable per-day limit per user
 - `write` / `talk` initiation: rate-limited to prevent harassment
 
-### 9.4 Write/Talk Permissions
+### 10.4 Write/Talk Permissions
 
 - `mesg n` is respected absolutely
 - `talk` can be declined interactively
 - Users can block specific other users (`block <username>`)
 - `wall` is admin-only, rate-limited even for admins
 
-### 9.5 Content & Moderation
+### 10.5 Content & Moderation
 
 - Admins can cancel any news article
 - Admins can delete any mail on the server (with audit log)
@@ -482,9 +547,9 @@ The REPL provides zero access to the underlying OS. There is no `exec`, no files
 
 ---
 
-## 10. Deployment
+## 11. Deployment
 
-### 10.1 Single Binary
+### 11.1 Single Binary
 
 The server compiles to a single Go binary with no runtime dependencies beyond PostgreSQL. The web frontend assets are embedded in the binary via `go:embed`.
 
@@ -492,7 +557,7 @@ The server compiles to a single Go binary with no runtime dependencies beyond Po
 alternate-sh serve --config /etc/alternate-sh/config.toml
 ```
 
-### 10.2 Configuration (`config.toml`)
+### 11.2 Configuration (`config.toml`)
 
 ```toml
 [server]
@@ -523,17 +588,17 @@ mail_per_hour = 50
 news_per_day = 20
 ```
 
-### 10.3 Database Migrations
+### 11.3 Database Migrations
 
 Schema migrations are embedded in the binary and run automatically on startup via a lightweight migration runner. No separate migration tool required.
 
-### 10.4 Docker
+### 11.4 Docker
 
 A `Dockerfile` and `docker-compose.yml` are provided for quick deployment alongside PostgreSQL.
 
 ---
 
-## 11. Repository Structure
+## 12. Repository Structure
 
 ```
 alternate.sh/
@@ -552,7 +617,8 @@ alternate.sh/
 │   │   ├── write.go
 │   │   └── ...
 │   ├── db/                  // PostgreSQL queries (sqlc generated)
-│   ├── federation/          // AFSP, NNTP peering, SMTP relay
+│   ├── assp/                // ASSP wire protocol (frames, handshake, TLS)
+│   ├── federation/          // ASSP server/client: presence, finger, talk relay
 │   ├── presence/            // online user tracking, events
 │   ├── editor/              // in-terminal text editor
 │   └── theme/               // terminal theme definitions
@@ -569,22 +635,28 @@ alternate.sh/
 
 ---
 
-## 12. Implementation Phases
+## 13. Implementation Phases
 
-### Phase 1 — Core Shell (MVP)
+### Phase 1 — Core Shell (MVP) ✅
 SSH server, WebSocket server, user auth, REPL, `finger`, `who`, `w`, `last`, `write`, `mesg`, `motd`, `fortune`, `plan`, `project`, `passwd`, `chfn`, `help`, `logout`. PostgreSQL schema and migrations.
 
-### Phase 2 — Web Frontend
-xterm.js client, WebSocket relay, phosphor/paper themes, opt-in CRT effects, `~/public/` rendering at `/~username`. The WebSocket server is already wired in Phase 1 — this phase is the client-side work and public-facing polish that makes the project presentable.
+### Phase 2 — Web Frontend ✅
+xterm.js client, WebSocket relay, phosphor/paper themes, opt-in CRT effects, `~/public/` rendering at `/~username`.
 
-### Phase 3 — Mail & News
+### Phase 3 — Mail & News ✅
 `mail`, `vacation`, MOTD editing, `msgs`, `calendar`, newsgroups, `rn`/`news`, `post`, `followup`.
 
-### Phase 4 — Real-time
-`talk`, `ytalk`, presence events, notification system (`biff`-style new mail alerts on login and during session).
+### Phase 4 — Real-time ✅
+`talk`, `ytalk`, presence idle tracking, `biff`-style new-mail alerts on login and during session.
 
-### Phase 5 — Federation
-ASSP server, NNTP peering, SMTP inter-server mail, `finger user@host`, `talk user@host`, node registry, admin peering commands.
+### Phase 4.1 — Public Signup & Hardening ✅
+Web-only email-confirmed signup, per-IP rate limiting, disposable-email blocking, input/XSS hardening. (SSH kept for login; signup web-only.)
 
-### Phase 6 — Games & Polish
+### Phase 5 — Federation ✅
+All-ASSP: multiplexed binary protocol on 4119 with peer-only HMAC + TLS-channel-binding auth, node registry (`node add/remove/list`), cross-node `rwho` and `finger user@host`, cross-node `talk` relay. No NNTP/SMTP servers (see §8).
+
+### Phase 6 — Retro-Futurism: Live A/V ← NEXT
+1-bit blue-noise-dithered monochrome video (~128×96 @ 24fps) and lofi narrowband audio, both bespoke client-side codecs, streamed over the WebSocket→ASSP substrate reusing the Phase-5 room-to-stream relay. 1:1 first, group-ready. Web-only (first feature outside the terminal emulator). Cross-node mail/news sync over ASSP. See §9.
+
+### Phase 7 — Games & Polish
 Door games framework, initial games, community fortune submission, mailing lists, advanced moderation tools.
