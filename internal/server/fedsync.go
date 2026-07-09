@@ -117,6 +117,14 @@ func (f *FedSync) ArticlePosted(articleID string) {
 	go f.pushArticle(articleID)
 }
 
+// PeerAdded reacts to `node add`: a peer just became (or returned to being)
+// reachable, so pull its news immediately and retry any queued mail rather
+// than waiting for the next tick.
+func (f *FedSync) PeerAdded() {
+	go f.SyncNews()
+	f.MailQueued()
+}
+
 // ArticleCancelled pushes a cancel of a local article to every peer.
 func (f *FedSync) ArticleCancelled(articleID string) {
 	go f.forEachPeer(func(peer federation.Peer) {

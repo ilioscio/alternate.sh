@@ -243,7 +243,7 @@ Implementation note: uses a pub/sub channel in the session layer, not TCP betwee
 Multi-party talk. Same split-screen model but with N participants, each in their own pane. Useful for small group coordination.
 
 **`call <user[@host]>`**
-Places a live audio/video call — the retro-futurism layer of §9. The terminal is the control surface: `call` rings the target, shows call status, and Ctrl+C hangs up; the actual media surface is the browser's phosphor-tinted call panel, which opens beside the terminal when the call connects (media is **web-only** — see §9.1). The recipient accepts by typing `call <caller>` back, mirroring talk's symmetric-join model, or ignores it until the ring times out. `call -a` places an audio-only call. Over SSH, `call` explains that calls need the web client, and SSH recipients see a text notice ("ilios is calling — join on the web"). Respects `mesg n` and is rate-limited like `talk`.
+Places a live audio/video call — the retro-futurism layer of §9. The terminal is the control surface: `call` rings the target, shows call status, and Ctrl+C hangs up; the actual media surface is the browser's phosphor-tinted call panel, which opens beside the terminal when the call connects (media is **web-only** — see §9.1). The recipient accepts by typing `call <caller>` back, mirroring talk's symmetric-join model, declines with `call -r <caller>`, or ignores it until the ring times out. `call -a` places an audio-only call. Over SSH, `call` explains that calls need the web client, and SSH recipients see a text notice ("ilios is calling — join on the web") — declining works from SSH too, since it's pure signaling. Respects `mesg n` and is rate-limited like `talk`.
 
 ---
 
@@ -449,7 +449,7 @@ node remove <node>
 node list
 ```
 
-Peering is bilateral: both admins must add each other with the same secret. The peer registry lives in the DB; secrets are resolved live per handshake.
+Peering is bilateral: both admins must add each other with the same secret. The peer registry lives in the DB; secrets are resolved live per handshake. Adding a peer immediately pulls its news backlog and flushes any mail queued while it was unreachable — no waiting for the hourly sync.
 
 ---
 
@@ -698,6 +698,9 @@ All-ASSP: multiplexed binary protocol on 4119 with peer-only HMAC + TLS-channel-
 
 ### Phase 6.1 — Federated Mail & News ✅
 Cross-node mail (`user@host`) and newsgroup propagation over the ASSP control channel (§8.4), reusing the peer registry and peering auth: queued mail with MAILER-DAEMON bounces and cross-node vacation replies, push + catch-up news sync with origin-identity dedupe/threading/cancel, shared-name group federation with `<hostname>.*` containment.
+
+### Phase 6.2 — Federation Polish ✅
+Two small follow-ups before the games phase: an explicit call decline (`call -r <user[@host]>`, usable from SSH since it's pure signaling), and `node add` triggering an immediate news sync + outbox flush instead of waiting for the hourly tick.
 
 ### Phase 7 — Games & Polish ← NEXT
 Door games framework, initial games, community fortune submission, mailing lists, advanced moderation tools.

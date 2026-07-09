@@ -38,8 +38,19 @@ let
         term.send((s + "\r").encode(), opcode=ABNF.OPCODE_BINARY)
 
     # The caller places the call; the callee answers once the ring arrives.
-    time.sleep(3 if role == "caller" else 8)
+    time.sleep(8 if role == "callee" else 3)
     type_line(f"call {target}")
+
+    if role == "caller-declined":
+        # Expect no call panel — just the terminal reporting the decline.
+        text = ""
+        while "declined" not in text:
+            op, frame = term.recv_data()
+            if op == ABNF.OPCODE_BINARY:
+                text += frame.decode("utf-8", "replace")
+        print("SAW-DECLINED", flush=True)
+        print("DONE", flush=True)
+        raise SystemExit(0)
 
     # Wait for the call-start control message (a text frame).
     call = None
@@ -278,6 +289,22 @@ pkgs.testers.runNixOSTest {
             "MEDIA-CLOSED", "DONE",
         )
 
+    with subtest("cross-node call declined from the ssh tier"):
+        # alice (web) rings; bob declines over plain SSH — declining is pure
+        # signaling, so the text tier can do it.
+        nodea.execute(
+            "fake-browser alice alicepass123 caller-declined bob@nodeb"
+            " > /tmp/alice-decline.out 2>&1 &"
+        )
+        nodeb.execute(
+            "{ sleep 6; printf 'call -r alice@nodea\\n'; sleep 2; } | "
+            + SSH.format(user="bob", pw="bobpass12345")
+            + " > /tmp/bob-decline.out 2>&1 &"
+        )
+        nodea.wait_until_succeeds("grep -q SAW-DECLINED /tmp/alice-decline.out", timeout=60)
+        bob_out = clean(nodeb.succeed("cat /tmp/bob-decline.out"))
+        expect(bob_out, "Call from alice@nodea declined.")
+
     # ── Federated mail (§8.4) ─────────────────────────────────────────────────
     with subtest("cross-node mail: queued, delivered, read on the peer"):
         out = sh(nodea, "alice", "alicepass123", [
@@ -387,5 +414,25 @@ pkgs.testers.runNixOSTest {
         nodea.sleep(8)  # give any (wrong) push time to land
         n = psql(nodeb, "SELECT count(*) FROM articles WHERE subject='LOCAL-ONLY-SUBJ'")
         assert n == "0", f"local-namespace article leaked to the peer ({n} rows)"
+
+    with subtest("node add pulls the peer's backlog immediately"):
+        # nodeb forgets nodea; nodea posts (its push is now refused by the
+        # handshake); re-adding must fetch the article at once — the hourly
+        # sync is nowhere near due.
+        out = sh(nodeb, "bob", "bobpass12345", ["node remove nodea"])
+        expect(out, "Peer nodea removed.")
+        out = sh(nodea, "alice", "alicepass123", [
+            "post alt.chat", "READD-SUBJ", "READD-BODY", ".", "y",
+        ])
+        expect(out, "Article posted.")
+        nodeb.sleep(3)  # let nodea's (refused) push come and go
+        n = psql(nodeb, "SELECT count(*) FROM articles WHERE subject='READD-SUBJ'")
+        assert n == "0", f"article arrived while unpeered ({n} rows)"
+
+        out = sh(nodeb, "bob", "bobpass12345", ["node add nodea", "${peerSecret}"])
+        expect(out, "Peer nodea added")
+        nodeb.wait_until_succeeds(psql_check(
+            "SELECT count(*) FROM articles WHERE subject='READD-SUBJ'", "1"
+        ), timeout=30)
   '';
 }

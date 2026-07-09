@@ -43,23 +43,26 @@ type CallEndMsg struct {
 
 func cmdCall(s *Session, args []string) error {
 	media := calls.MediaAV
+	decline := false
 	var target string
 	for _, a := range args {
 		switch {
 		case a == "-a":
 			media = calls.MediaAudio
+		case a == "-r":
+			decline = true
 		case strings.HasPrefix(a, "-"):
-			usageError(s, "call", "[-a] <user[@host]>")
+			usageError(s, "call", "[-a|-r] <user[@host]>")
 			return nil
 		case target != "":
-			usageError(s, "call", "[-a] <user[@host]>")
+			usageError(s, "call", "[-a|-r] <user[@host]>")
 			return nil
 		default:
 			target = a
 		}
 	}
 	if target == "" {
-		usageError(s, "call", "[-a] <user[@host]>")
+		usageError(s, "call", "[-a|-r] <user[@host]>")
 		return nil
 	}
 
@@ -67,10 +70,26 @@ func cmdCall(s *Session, args []string) error {
 		s.Println("call: calls are disabled on this node")
 		return nil
 	}
+
+	// Declining is pure signaling, so it works from any tier — an SSH user
+	// can silence a ring even though media itself is web-only. For a
+	// cross-node call, ending the local call makes the federation handler
+	// relay "declined" back to the caller's node.
+	if decline {
+		c := s.hub.Calls.PendingFor(s.User.Username, target)
+		if c == nil {
+			s.Printf("call: no incoming call from %s\r\n", target)
+			return nil
+		}
+		c.End("declined")
+		s.Printf("Call from %s declined.\r\n", target)
+		return nil
+	}
+
 	if !s.IsWeb() {
 		s.Println("call: calls carry live audio/video, which needs the web client.")
 		s.Printf("      Log in at the web frontend to place or answer calls;\r\n")
-		s.Printf("      ssh remains the classic text tier.\r\n")
+		s.Printf("      ssh remains the classic text tier ('call -r <user>' declines a ring).\r\n")
 		return nil
 	}
 
@@ -123,8 +142,8 @@ func cmdCall(s *Session, args []string) error {
 	notified := s.hub.Send(target, presence.WriteNotice{
 		Kind: presence.NoticeCall,
 		From: s.User.Username,
-		Message: fmt.Sprintf("Incoming %s from %s. Type 'call %s' to answer (web client).",
-			kind, s.User.Username, s.User.Username),
+		Message: fmt.Sprintf("Incoming %s from %s. Type 'call %s' to answer (web client), or 'call -r %s' to decline.",
+			kind, s.User.Username, s.User.Username, s.User.Username),
 	})
 	if notified == 0 {
 		c.End("unreachable")

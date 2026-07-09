@@ -157,8 +157,8 @@ func handleIncomingCall(cfg *config.Config, hub *presence.Hub, peerNode string, 
 	notified := hub.Send(target, presence.WriteNotice{
 		Kind: presence.NoticeCall,
 		From: fromQualified,
-		Message: fmt.Sprintf("Incoming %s from %s. Type 'call %s' to answer (web client).",
-			kind, fromQualified, fromQualified),
+		Message: fmt.Sprintf("Incoming %s from %s. Type 'call %s' to answer (web client), or 'call -r %s' to decline.",
+			kind, fromQualified, fromQualified, fromQualified),
 	})
 	if notified == 0 {
 		c.End("unreachable")

@@ -19,7 +19,7 @@ adjusting the tests.
 | NixOS VM integration test | `nix/tests.nix` | `nix build .#checks.x86_64-linux.commands` | Every shell command, end to end, over real SSH with a real PostgreSQL |
 | NixOS VM integration test | `nix/tests-signup.nix` | `nix build .#checks.x86_64-linux.signup` | Web self-signup → email → confirm (code + link) → login, with mailpit as SMTP sink |
 | Go unit tests | `internal/federation/sync_test.go` | `go test ./internal/federation/` | Mail/news federation verbs over real TLS: MAIL_SEND (delivery, permanent rejection, vacation-in-response), NEWS_ARTICLE/CANCEL, NEWS_SINCE batching and mark resume |
-| NixOS VM integration test | `nix/tests-federation.nix` | `nix build .#checks.x86_64-linux.federation` | Two-node peering, cross-node finger/rwho/talk, a full cross-node call (scripted web clients over `/ws/call`→ASSP), and federated mail & news: queued delivery + reply, MAILER-DAEMON bounce, cross-node vacation auto-reply, article propagation + threading + cancel, catch-up sync across a service restart, and local-namespace containment |
+| NixOS VM integration test | `nix/tests-federation.nix` | `nix build .#checks.x86_64-linux.federation` | Two-node peering, cross-node finger/rwho/talk, a full cross-node call (scripted web clients over `/ws/call`→ASSP) including decline from the SSH tier, and federated mail & news: queued delivery + reply, MAILER-DAEMON bounce, cross-node vacation auto-reply, article propagation + threading + cancel, catch-up sync across a service restart, local-namespace containment, and immediate backlog pull on `node add` |
 
 All run as part of `nix flake check` (the VM tests on Linux systems only —
 NixOS VM tests cannot run on darwin).

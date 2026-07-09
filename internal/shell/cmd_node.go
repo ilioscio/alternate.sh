@@ -106,5 +106,11 @@ func nodeAdd(s *Session, args []string) error {
 	}
 	s.Printf("Peer %s added (%s).\r\n", node, shown)
 	s.Println("Note: peering is bilateral — the other node's admin must add this node with the same secret.")
+
+	// Don't wait for the hourly tick: pull the new peer's news now and
+	// flush any mail that queued while it was unreachable.
+	if Federation != nil {
+		Federation.PeerAdded()
+	}
 	return nil
 }

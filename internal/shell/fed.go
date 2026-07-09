@@ -7,6 +7,9 @@ type FederationNotifier interface {
 	MailQueued()
 	ArticlePosted(articleID string)
 	ArticleCancelled(articleID string)
+	// PeerAdded fires after `node add`: sync news from the new peer right
+	// away and flush any mail queued while it was unreachable.
+	PeerAdded()
 }
 
 // Federation is set by main at startup iff federation is enabled; commands
