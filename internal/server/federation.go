@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ilioscio/alternate.sh/internal/assp"
+	"github.com/ilioscio/alternate.sh/internal/calls"
 	"github.com/ilioscio/alternate.sh/internal/config"
 	"github.com/ilioscio/alternate.sh/internal/db"
 	"github.com/ilioscio/alternate.sh/internal/federation"
@@ -43,6 +44,9 @@ func NewFederation(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, 
 	srv := federation.NewServer(node, src, secretFor, tlsCfg)
 	srv.OnTalkOpen = func(peerNode string, req federation.TalkOpenRequest, ac *assp.Conn) {
 		handleIncomingTalk(hub, peerNode, req, ac)
+	}
+	srv.OnCallOpen = func(peerNode string, req federation.CallOpenRequest, ac *assp.Conn) {
+		handleIncomingCall(cfg, hub, peerNode, req, ac)
 	}
 	return &FederationServer{
 		addr: fmt.Sprintf(":%d", cfg.Federation.ASSPPort),
@@ -92,6 +96,100 @@ func handleIncomingTalk(hub *presence.Hub, peerNode string, req federation.TalkO
 	// Bridge until the talk ends, then clear the pending invitation.
 	federation.RelayRoomToStream(pseudo, ac)
 	hub.RemoveIncomingTalk(target, fromQualified)
+}
+
+// handleIncomingCall runs the receiving side of a cross-node call: it rings
+// the target, holds the connection open until a human answers (the deferred
+// CALL_OPEN response), then bridges the call room to the connection's media
+// channels. The caller's node cancels a ring by closing the connection.
+func handleIncomingCall(cfg *config.Config, hub *presence.Hub, peerNode string, req federation.CallOpenRequest, ac *assp.Conn) {
+	reject := func(reason string) {
+		federation.WriteResponse(ac, federation.CallOpenResponse{Accepted: false, Reason: reason})
+		ac.Close()
+	}
+	if !cfg.Calls.Enabled {
+		reject("calls are disabled on this node")
+		return
+	}
+	fromQualified := req.From + "@" + peerNode
+	target := req.Target
+
+	available := false
+	for _, e := range hub.FindByUsername(target) {
+		if e.MesgOn {
+			available = true
+			break
+		}
+	}
+	if !available {
+		reject("user not available")
+		return
+	}
+
+	// Clamp the caller's proposal to this node's ceiling; the response
+	// carries the final values back.
+	params := req.Params.Clamp(cfg.Calls.Width, cfg.Calls.Height, cfg.Calls.FPS)
+	c, err := hub.Calls.Offer(fromQualified, target, req.Media, params)
+	if err != nil {
+		reject(err.Error())
+		return
+	}
+
+	kind := "video call"
+	if req.Media == calls.MediaAudio {
+		kind = "voice call"
+	}
+	notified := hub.Send(target, presence.WriteNotice{
+		Kind: presence.NoticeCall,
+		From: fromQualified,
+		Message: fmt.Sprintf("Incoming %s from %s. Type 'call %s' to answer (web client).",
+			kind, fromQualified, fromQualified),
+	})
+	if notified == 0 {
+		c.End("unreachable")
+		reject("user not available")
+		return
+	}
+
+	// Single reader for the connection's whole life: nothing legitimate
+	// arrives before our response, so any frame — or the channel closing —
+	// during the ring means the caller hung up.
+	frames := federation.ReadFrames(ac)
+
+	select {
+	case <-c.Accepted():
+		// The callee answered (their `call user@host` matched the pending
+		// offer). Stand in for the remote caller in the call room and bridge.
+		pseudo, _, ok := hub.Rooms.JoinID(
+			c.RoomID(),
+			[]string{c.Caller, c.Callee},
+			"relay:"+fromQualified+"->"+target,
+			fromQualified,
+		)
+		if !ok {
+			c.End("relay setup failed")
+			reject("could not set up relay")
+			return
+		}
+		if err := federation.WriteResponse(ac, federation.CallOpenResponse{Accepted: true, Params: params}); err != nil {
+			c.End("connection to peer lost")
+			pseudo.Leave()
+			ac.Close()
+			return
+		}
+		federation.RelayCallRoomToStream(c, pseudo, ac, frames, calls.SourceCaller)
+
+	case <-c.Ended():
+		// Ring timeout, or the target went unavailable.
+		reject(c.EndReason())
+
+	case <-frames:
+		// A frame before our response is a protocol violation, and the
+		// channel closing means the connection died: either way, the
+		// caller's node is gone.
+		c.End("canceled by caller")
+		ac.Close()
+	}
 }
 
 func (f *FederationServer) ListenAndServe() error {

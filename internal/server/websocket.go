@@ -40,6 +40,10 @@ type WebSocketServer struct {
 	email  *email.Sender
 	signup *ratelimit.Limiter
 	login  *ratelimit.Limiter
+
+	// authFn resolves a session token to its user. It exists as a field so
+	// tests can exercise the WebSocket endpoints without a database.
+	authFn func(ctx context.Context, token string) (*db.User, error)
 }
 
 func NewWebSocket(cfg *config.Config, pool *pgxpool.Pool, hub *presence.Hub) *WebSocketServer {
@@ -53,11 +57,16 @@ func NewWebSocket(cfg *config.Config, pool *pgxpool.Pool, hub *presence.Hub) *We
 		login:  ratelimit.New(10, 5*time.Minute),   // 10 login attempts per IP / 5 min
 	}
 
+	s.authFn = func(ctx context.Context, token string) (*db.User, error) {
+		return db.GetSessionUser(ctx, s.pool, token)
+	}
+
 	s.mux.HandleFunc("/api/login",   s.handleLogin)
 	s.mux.HandleFunc("/api/logout",  s.handleLogout)
 	s.mux.HandleFunc("/api/signup",  s.handleSignup)
 	s.mux.HandleFunc("/api/confirm", s.handleConfirmCode)
 	s.mux.HandleFunc("/ws",          s.handleWS)
+	s.mux.HandleFunc("/ws/call",     s.handleCallWS)
 	s.mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
@@ -182,7 +191,7 @@ func (s *WebSocketServer) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err := db.GetSessionUser(r.Context(), s.pool, token)
+	u, err := s.authFn(r.Context(), token)
 	if err != nil {
 		http.Error(w, "invalid or expired session", http.StatusUnauthorized)
 		return
@@ -209,6 +218,16 @@ func (s *WebSocketServer) handleWS(w http.ResponseWriter, r *http.Request) {
 		pr, ww, 24, 80,
 		u, s.hub, s.pool, s.cfg,
 	)
+
+	// Web sessions get a JSON control channel (text frames server→browser):
+	// call signaling rides it; terminal bytes stay on binary frames.
+	sess.AttachControl(func(v any) error {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		return ww.WriteText(b)
+	})
 
 	// Run the shell in the background; cancel context when it exits.
 	go func() {
@@ -316,4 +335,12 @@ func (w *wsWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// WriteText sends a text frame (JSON control message) under the same mutex
+// as terminal output, so control frames never interleave mid-message.
+func (w *wsWriter) WriteText(p []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.conn.WriteMessage(websocket.TextMessage, p)
 }

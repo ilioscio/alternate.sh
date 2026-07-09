@@ -10,6 +10,71 @@ let
   # Shared peering secret used by both nodes.
   peerSecret = "federation-shared-secret-abc123";
 
+  # fake-browser: a scripted stand-in for the web client, exercising the real
+  # call path end-to-end — login, terminal WebSocket, `call` at the REPL,
+  # the call-start control message, the /ws/call media socket, one media
+  # packet each way, and hangup via Ctrl+C on the terminal.
+  fakeBrowser = pkgs.writeScriptBin "fake-browser" ''
+    #!${pkgs.python3.withPackages (ps: [ ps.websocket-client ])}/bin/python3
+    import json, sys, time, urllib.request
+    import websocket
+    from websocket import ABNF
+
+    user, pw, role, target = sys.argv[1:5]
+    host = "127.0.0.1:8080"
+
+    req = urllib.request.Request(
+        f"http://{host}/api/login",
+        data=json.dumps({"username": user, "password": pw}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    token = json.loads(urllib.request.urlopen(req).read())["token"]
+
+    term = websocket.WebSocket()
+    term.connect(f"ws://{host}/ws?token={token}")
+    term.settimeout(60)
+
+    def type_line(s):
+        term.send((s + "\r").encode(), opcode=ABNF.OPCODE_BINARY)
+
+    # The caller places the call; the callee answers once the ring arrives.
+    time.sleep(3 if role == "caller" else 8)
+    type_line(f"call {target}")
+
+    # Wait for the call-start control message (a text frame).
+    call = None
+    while call is None:
+        op, frame = term.recv_data()
+        if op == ABNF.OPCODE_TEXT:
+            m = json.loads(frame)
+            if m.get("type") == "call-start":
+                call = m
+    print("CALL-START", call["role"], call["peer"], call["params"]["width"], flush=True)
+
+    media = websocket.WebSocket()
+    media.connect(f"ws://{host}/ws/call?token={token}&call={call['callId']}")
+    media.settimeout(60)
+    time.sleep(2)  # let both media sockets and the ASSP bridge settle
+
+    # One valid video keyframe: header | 128x96 | PackBits(1536 zero bytes).
+    pkt = bytes([1, call["source"], 0, 0, 0, 128, 0, 96]) + bytes([0x81, 0x00] * 12)
+    media.send(pkt, opcode=ABNF.OPCODE_BINARY)
+
+    got = media.recv()
+    print("MEDIA-RECV", bytes(got).hex(), flush=True)
+
+    time.sleep(2)
+    if role == "caller":
+        term.send(b"\x03", opcode=ABNF.OPCODE_BINARY)  # Ctrl+C: hang up
+    # Both sides: the media socket must close when the call ends.
+    try:
+        media.recv()
+        print("MEDIA-STILL-OPEN", flush=True)
+    except Exception:
+        print("MEDIA-CLOSED", flush=True)
+    print("DONE", flush=True)
+  '';
+
   mkNode = name: { config, ... }: {
     imports = [ module ];
     networking.hostName = name;
@@ -22,7 +87,10 @@ let
       federation.enable = true;      # ASSP listener on 4119
       openFirewall = true;           # nodes must reach each other on 4119
     };
-    environment.systemPackages = [ package pkgs.sshpass config.services.postgresql.package ];
+    environment.systemPackages = [
+      package pkgs.sshpass pkgs.curl fakeBrowser
+      config.services.postgresql.package
+    ];
     virtualisation.memorySize = 1024;
   };
 in
@@ -145,5 +213,49 @@ pkgs.testers.runNixOSTest {
 
         expect(alice_out, "Ringing bob@nodeb", "BOB-CANARY")
         expect(bob_out, "talk request from alice@nodea", "ALICE-CANARY")
+
+    # ── The A/V layer (§9) ────────────────────────────────────────────────────
+    with subtest("call panel assets are served by the embedded frontend"):
+        nodea.succeed("curl -sf http://127.0.0.1:8080/js/app.js | grep -q connectWS")
+        nodea.succeed("curl -sf http://127.0.0.1:8080/js/call.js | grep -q 'call-start'")
+        nodea.succeed("curl -sf http://127.0.0.1:8080/js/bluenoise.js | grep -q BLUE_NOISE_MASK")
+        nodea.succeed("curl -sf http://127.0.0.1:8080/js/worklets.js | grep -q capture-processor")
+        nodea.succeed("curl -sf http://127.0.0.1:8080/ | grep -q call-panel")
+
+    with subtest("call over ssh explains the web requirement"):
+        out = sh(nodea, "alice", "alicepass123", ["call bob@nodeb"])
+        expect(out, "needs the web client")
+
+    with subtest("cross-node call: full web path, media both ways, hangup"):
+        # Two scripted web clients: alice (caller, nodea) and bob (callee,
+        # nodeb). Each sends one valid keyframe and must receive the peer's.
+        nodeb.execute(
+            "fake-browser bob bobpass12345 callee alice@nodea"
+            " > /tmp/bob-call.out 2>&1 &"
+        )
+        nodea.execute(
+            "fake-browser alice alicepass123 caller bob@nodeb"
+            " > /tmp/alice-call.out 2>&1 &"
+        )
+        # Poll for completion rather than guessing a sleep.
+        nodea.wait_until_succeeds("grep -q DONE /tmp/alice-call.out", timeout=90)
+        nodeb.wait_until_succeeds("grep -q DONE /tmp/bob-call.out", timeout=90)
+
+        alice_out = nodea.succeed("cat /tmp/alice-call.out")
+        bob_out = nodeb.succeed("cat /tmp/bob-call.out")
+
+        # The packet each side receives is the peer's: same body, peer's
+        # source id (alice=0, bob=1) — byte-identical across the bridge.
+        body = (bytes([0, 0, 0, 128, 0, 96]) + bytes([0x81, 0x00] * 12)).hex()
+        expect(alice_out,
+            "CALL-START caller bob@nodeb 128",
+            "MEDIA-RECV " + (bytes([1, 1]).hex() + body),  # from bob (source 1)
+            "MEDIA-CLOSED", "DONE",
+        )
+        expect(bob_out,
+            "CALL-START callee alice@nodea 128",
+            "MEDIA-RECV " + (bytes([1, 0]).hex() + body),  # from alice (source 0)
+            "MEDIA-CLOSED", "DONE",
+        )
   '';
 }

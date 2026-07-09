@@ -50,6 +50,7 @@
             gopls
             gotools      # goimports, staticcheck, etc.
             postgresql_16
+            nodejs       # runs the JS codec parity tests (node --test web/js/test/)
           ];
           shellHook = ''
             export GOPATH="$HOME/go"
@@ -63,6 +64,15 @@
         # ── Checks (nix flake check) ──────────────────────────────────────────
         checks = {
           build = self.packages.${system}.default;
+
+          # JS codec parity: the browser codecs must match internal/av
+          # byte-for-byte on the shared vectors.
+          codecs-js = pkgs.runCommand "codecs-js"
+            { nativeBuildInputs = [ pkgs.nodejs ]; } ''
+            cd ${./.}
+            node --test web/js/test/*.test.mjs
+            touch $out
+          '';
         } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           # Full-VM integration test driving every shell command over SSH.
           # Run with:  nix build .#checks.x86_64-linux.commands

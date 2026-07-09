@@ -65,16 +65,22 @@ func RoomID(usernames []string) string {
 	return "talk:" + strings.Join(uniq, "+")
 }
 
-// Join adds a session to the room for the given participant set, creating
-// the room if needed. Only listed participants may join. Returns the member
-// handle and the usernames of peers already present.
+// Join adds a session to the talk room for the given participant set,
+// creating the room if needed. Only listed participants may join. Returns
+// the member handle and the usernames of peers already present.
+func (b *RoomBroker) Join(participants []string, sessionID, username string) (*RoomMember, []string, bool) {
+	return b.JoinID(RoomID(participants), participants, sessionID, username)
+}
+
+// JoinID is Join with an explicit room ID — used by calls, whose rooms are
+// keyed by call ID ("call:<id>") rather than by participant set, since a
+// call is a negotiated object with its own lifecycle rather than a
+// rendezvous. The invited list still gates membership.
 //
 // Locking: membership changes happen under broker.mu → room.mu (in that
 // order, always), so a join can never race a concurrent teardown into an
 // orphaned room object.
-func (b *RoomBroker) Join(participants []string, sessionID, username string) (*RoomMember, []string, bool) {
-	id := RoomID(participants)
-
+func (b *RoomBroker) JoinID(id string, participants []string, sessionID, username string) (*RoomMember, []string, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -156,8 +162,11 @@ func (m *RoomMember) Leave() {
 	}
 	m.closed = true
 
+	// Remove by identity, not SessionID: two members may share a session ID
+	// (e.g. a rejected duplicate join), and removing the wrong entry would
+	// leave a closed Recv in the list for Send to panic on.
 	for i, other := range room.members {
-		if other.SessionID == m.SessionID {
+		if other == m {
 			room.members = append(room.members[:i], room.members[i+1:]...)
 			break
 		}

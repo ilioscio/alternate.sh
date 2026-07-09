@@ -23,6 +23,10 @@ type Server struct {
 	// it is responsible for responding and for bridging or closing the conn.
 	// The serve loop hands the connection off and stops reading it.
 	OnTalkOpen func(peerNode string, req TalkOpenRequest, ac *assp.Conn)
+
+	// OnCallOpen, if set, handles an inbound cross-node call the same way —
+	// but the handler's response is deferred until the callee answers.
+	OnCallOpen func(peerNode string, req CallOpenRequest, ac *assp.Conn)
 }
 
 // NewServer builds a federation server. node is this node's ASSP identity,
@@ -91,6 +95,10 @@ func (s *Server) serve(ac *assp.Conn, peer string) bool {
 			s.handleTalkOpen(ac, peer, req)
 			return true // talk relay (or its rejection) owns the connection now
 		}
+		if req.Verb == VerbCallOpen {
+			s.handleCallOpen(ac, peer, req)
+			return true // call handler (or its rejection) owns the connection now
+		}
 		s.dispatch(ac, req)
 	}
 }
@@ -104,6 +112,20 @@ func (s *Server) handleTalkOpen(ac *assp.Conn, peer string, req Request) {
 		return
 	}
 	s.OnTalkOpen(peer, TalkOpenRequest{From: req.Arg, Target: req.Target}, ac)
+}
+
+// handleCallOpen dispatches an inbound call to OnCallOpen, or rejects it.
+func (s *Server) handleCallOpen(ac *assp.Conn, peer string, req Request) {
+	if s.OnCallOpen == nil {
+		s.respond(ac, req.ID, CallOpenResponse{Accepted: false, Reason: "calls not available"})
+		ac.Close()
+		return
+	}
+	co := CallOpenRequest{From: req.Arg, Target: req.Target, Media: req.Media}
+	if req.Params != nil {
+		co.Params = *req.Params
+	}
+	s.OnCallOpen(peer, co, ac)
 }
 
 func (s *Server) dispatch(ac *assp.Conn, req Request) {

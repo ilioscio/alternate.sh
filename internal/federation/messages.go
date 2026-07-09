@@ -4,6 +4,8 @@
 // internal/assp.
 package federation
 
+import "github.com/ilioscio/alternate.sh/internal/calls"
+
 // Control verbs.
 const (
 	VerbWho    = "WHO"
@@ -15,7 +17,10 @@ type Request struct {
 	ID     uint32 `json:"id"`
 	Verb   string `json:"verb"`
 	Arg    string `json:"arg,omitempty"`
-	Target string `json:"target,omitempty"` // used by TALK_OPEN
+	Target string `json:"target,omitempty"` // used by TALK_OPEN and CALL_OPEN
+
+	Media  string        `json:"media,omitempty"`  // used by CALL_OPEN
+	Params *calls.Params `json:"params,omitempty"` // used by CALL_OPEN
 }
 
 // PresenceEntry is one logged-in user as reported by a node's WHO.

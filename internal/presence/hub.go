@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ilioscio/alternate.sh/internal/calls"
 )
 
 // NoticeKind distinguishes the notification types delivered to terminals.
@@ -16,6 +18,7 @@ const (
 	NoticeWall  NoticeKind = "wall"  // admin broadcast — always delivered
 	NoticeBiff  NoticeKind = "biff"  // new mail alert — respects biff setting
 	NoticeTalk  NoticeKind = "talk"  // talk/ytalk invitation — respects mesg
+	NoticeCall  NoticeKind = "call"  // incoming A/V call — respects mesg
 )
 
 type WriteNotice struct {
@@ -42,8 +45,11 @@ type Hub struct {
 	sessions map[string]*Entry // session ID -> entry
 	ttySeq   atomic.Int64
 
-	// Rooms carries the real-time talk/ytalk byte streams.
+	// Rooms carries the real-time talk/ytalk/call byte streams.
 	Rooms *RoomBroker
+
+	// Calls is the call-signaling exchange (offers, rings, hangups).
+	Calls *calls.Manager
 
 	// incomingTalk marks pending cross-node talk invitations, keyed by
 	// (localUser, remoteUser@remoteNode). Set by the federation server when a
@@ -58,6 +64,7 @@ func NewHub() *Hub {
 	return &Hub{
 		sessions:     make(map[string]*Entry),
 		Rooms:        NewRoomBroker(),
+		Calls:        calls.NewManager(),
 		incomingTalk: make(map[string]bool),
 	}
 }

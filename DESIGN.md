@@ -242,6 +242,9 @@ Implementation note: uses a pub/sub channel in the session layer, not TCP betwee
 **`ytalk <user1> [user2...]`**
 Multi-party talk. Same split-screen model but with N participants, each in their own pane. Useful for small group coordination.
 
+**`call <user[@host]>`**
+Places a live audio/video call — the retro-futurism layer of §9. The terminal is the control surface: `call` rings the target, shows call status, and Ctrl+C hangs up; the actual media surface is the browser's phosphor-tinted call panel, which opens beside the terminal when the call connects (media is **web-only** — see §9.1). The recipient accepts by typing `call <caller>` back, mirroring talk's symmetric-join model, or ignores it until the ring times out. `call -a` places an audio-only call. Over SSH, `call` explains that calls need the web client, and SSH recipients see a text notice ("ilios is calling — join on the web"). Respects `mesg n` and is rate-limited like `talk`.
+
 ---
 
 ### 5.6 News (Bulletin Boards)
@@ -503,9 +506,31 @@ No standard codec is involved. Opus would be "better," but bespoke-and-lofi *is 
 
 **v1 is 1:1**, mirroring `talk`. A `CALL_OPEN` control message (analogous to `TALK_OPEN`) negotiates participants, media types (audio, video, or both), and codec parameters (resolution, fps, sample rate). Calls are **offered and accepted interactively**, respect `mesg`/do-not-disturb, and can be declined.
 
+The user-facing verb is **`call <user[@host]>`** (`-a` for audio-only), and the terminal remains the control surface even though media is web-only: `call` rings the target, shows call status, and Ctrl+C hangs up; the browser's call panel opens and closes in response to JSON control messages on the terminal's own WebSocket, then attaches a second, media-only WebSocket (`/ws/call`). The recipient answers by typing `call <caller>` back — the same symmetric-join model as `talk`. Unlike `TALK_OPEN`, a `CALL_OPEN` response is **deferred until a human answers** (or the ring times out, ~45s); codec parameters are negotiated by the callee's node clamping the caller's proposal to its own configured limits, and the final parameters ride back in the response.
+
 The design is **group-ready**: the room abstraction already supports N members, and media frames carry a per-source identifier so that group calls become a fan-out (the server relays each participant's stream to the others) with the client **tiling video and mixing audio**. Group rooms are a later phase, not a v1 rewrite.
 
-### 9.7 Non-Goals
+### 9.7 Wire Format
+
+Every media payload — a binary message on the `/ws/call` WebSocket and the payload of an ASSP stream frame alike — is a self-describing **media packet** with a 4-byte header:
+
+```
+u8 kind | u8 source | u16 seq        (big-endian)
+```
+
+- `kind` — `0x01` video keyframe, `0x02` video delta, `0x03` audio chunk
+- `source` — participant id within the call (the group-readiness hook of §9.6; a 1:1 call uses 0 and 1)
+- `seq` — per-source, per-media wrapping counter, incremented **only for transmitted packets**
+
+**Video payload:** `u16 width | u16 height`, then the packed 1-bit bitmap (keyframe) or the XOR against the previous frame (delta), both compressed with **PackBits RLE**. Width is a multiple of 8; rows pack MSB-first. Keyframes go out every ~2 seconds (48 frames); an all-zero delta (nothing moved) is simply **not sent** — with temporally-stable blue-noise dither this makes a still scene nearly free. A receiver that sees a `seq` gap (a relay shed a late frame) freezes and waits for the next keyframe rather than decoding garbage.
+
+**Audio payload:** `i16 predictor | u8 step_index | u8 reserved`, then 4-bit IMA-ADPCM samples — 20ms chunks (160 samples at 8kHz → 80 bytes + header). Every chunk carries its own decoder state, so any chunk is independently decodable: a dropped chunk costs 20ms of silence, never desync.
+
+Over ASSP, a call's dedicated connection maps **video to stream channel 2 and audio to channel 3**, every media frame flagged `FlagDroppable`. On the web leg, the browser's `/ws/call` binary messages are media packets verbatim; the server relays them into the same room fan-out that talk uses.
+
+**Codec parity.** The codecs are implemented twice — canonical JS in the browser, and a Go twin the server's integration tests use to prove real decodable media flowed end-to-end — cross-validated byte-for-byte against shared, committed test vectors (including the blue-noise mask itself), so the two implementations cannot drift.
+
+### 9.8 Non-Goals
 
 No color. No HD, ever — low detail is a feature. No WebRTC, no P2P, no TURN. **Nothing is stored**: media is ephemeral and never touches the database, consistent with `talk`. No interoperability with standard videoconferencing — this is an in-universe medium, not a Zoom client.
 
@@ -578,9 +603,13 @@ dsn = "postgres://alternateuser:pass@localhost/alternatedb"
 
 [federation]
 assp_port = 4119
-nntp_port = 119
-smtp_port = 25
 enabled = true
+
+[calls]
+enabled = true
+width = 128
+height = 96
+fps = 24
 
 [limits]
 max_users = 500
@@ -618,14 +647,19 @@ alternate.sh/
 │   │   └── ...
 │   ├── db/                  // PostgreSQL queries (sqlc generated)
 │   ├── assp/                // ASSP wire protocol (frames, handshake, TLS)
-│   ├── federation/          // ASSP server/client: presence, finger, talk relay
-│   ├── presence/            // online user tracking, events
+│   ├── federation/          // ASSP server/client: presence, finger, talk/call relay
+│   ├── presence/            // online user tracking, events, rooms
+│   ├── calls/               // call signaling (offer/ring/accept/hangup)
+│   ├── av/                  // media codecs, Go twin (dither, RLE, video, ADPCM)
 │   ├── editor/              // in-terminal text editor
 │   └── theme/               // terminal theme definitions
-├── web/                     // xterm.js frontend (embedded)
+├── web/                     // frontend (embedded)
 │   ├── index.html
-│   ├── terminal.js
-│   └── themes/
+│   └── js/                  // ES modules: terminal glue, codecs, call UI
+│       ├── app.js           //   login + xterm + control channel
+│       ├── call.js          //   capture→dither→encode pipeline, media WS
+│       ├── videocodec.js    //   canonical JS codecs (Go twins in internal/av)
+│       └── ...
 ├── migrations/              // SQL migration files
 ├── config.example.toml
 ├── Dockerfile
@@ -656,7 +690,10 @@ Web-only email-confirmed signup, per-IP rate limiting, disposable-email blocking
 All-ASSP: multiplexed binary protocol on 4119 with peer-only HMAC + TLS-channel-binding auth, node registry (`node add/remove/list`), cross-node `rwho` and `finger user@host`, cross-node `talk` relay. No NNTP/SMTP servers (see §8).
 
 ### Phase 6 — Retro-Futurism: Live A/V ← NEXT
-1-bit blue-noise-dithered monochrome video (~128×96 @ 24fps) and lofi narrowband audio, both bespoke client-side codecs, streamed over the WebSocket→ASSP substrate reusing the Phase-5 room-to-stream relay. 1:1 first, group-ready. Web-only (first feature outside the terminal emulator). Cross-node mail/news sync over ASSP. See §9.
+`call <user[@host]>`: 1-bit blue-noise-dithered monochrome video (~128×96 @ 24fps) and lofi narrowband audio, both bespoke client-side codecs (with Go twins cross-validated by shared test vectors), streamed over the WebSocket→ASSP substrate reusing the Phase-5 room-to-stream relay. 1:1 first, group-ready. Web-only (first feature outside the terminal emulator). See §9.
+
+### Phase 6.1 — Federated Mail & News
+Cross-node mail (`user@host`) and newsgroup propagation over the ASSP control channel (§8.4), reusing the peer registry and peering auth. Split out of Phase 6 so the A/V work gets undivided attention.
 
 ### Phase 7 — Games & Polish
 Door games framework, initial games, community fortune submission, mailing lists, advanced moderation tools.

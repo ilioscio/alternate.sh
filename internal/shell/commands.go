@@ -66,6 +66,7 @@ func init() {
 	register("last", cmdLast)
 	register("write", cmdWrite)
 	register("talk", cmdTalk, "ytalk")
+	register("call", cmdCall)
 	register("mesg", cmdMesg)
 	register("motd", cmdMotd)
 	register("msgs", cmdMsgs)

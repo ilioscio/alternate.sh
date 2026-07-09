@@ -94,6 +94,7 @@ func helpForCommand(s *Session, cmd string) error {
 		"last":     "last [user]            — show login history",
 		"write":    "write <user> [msg]     — send a message to a logged-in user",
 		"talk":     "talk <user> [user...]  — split-screen live chat; each party runs 'talk <the others>'",
+		"call":     "call [-a] <user[@host]> — live A/V call (web client); -a voice only; answer with 'call <caller>'",
 		"mesg":     "mesg [y|n]             — enable/disable incoming messages",
 		"motd":     "motd [set]             — display the message of the day; 'set' edits it (admin)",
 		"msgs":     "msgs [-q]              — read system messages",

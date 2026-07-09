@@ -41,6 +41,12 @@ let
     assp_port = ${toString cfg.federation.asspPort}
     enabled   = ${if cfg.federation.enable then "true" else "false"}
 
+    [calls]
+    enabled = ${if cfg.calls.enable then "true" else "false"}
+    width   = ${toString cfg.calls.width}
+    height  = ${toString cfg.calls.height}
+    fps     = ${toString cfg.calls.fps}
+
     [limits]
     max_users     = ${toString cfg.limits.maxUsers}
     mail_per_hour = ${toString cfg.limits.mailPerHour}
@@ -185,6 +191,29 @@ in {
         type = lib.types.port;
         default = 4119;
         description = "Port for the ASSP (Alternate Shell Server Protocol) federation listener. Presence, finger, and talk relay all run over this one port.";
+      };
+    };
+
+    calls = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable live A/V calls (web client only; see DESIGN.md §9).";
+      };
+      width = lib.mkOption {
+        type = lib.types.int;
+        default = 128;
+        description = "Video width ceiling in pixels (multiple of 8). Cross-node negotiation clamps to this.";
+      };
+      height = lib.mkOption {
+        type = lib.types.int;
+        default = 96;
+        description = "Video height ceiling in pixels.";
+      };
+      fps = lib.mkOption {
+        type = lib.types.int;
+        default = 24;
+        description = "Video frame-rate ceiling.";
       };
     };
 

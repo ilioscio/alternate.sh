@@ -29,6 +29,10 @@ type Session struct {
 
 	writeCh chan presence.WriteNotice
 
+	// ctrl sends a JSON control message to the web client (call signaling).
+	// nil for SSH sessions — the web frontend is the only rich client.
+	ctrl func(v any) error
+
 	hub *presence.Hub
 	db  *pgxpool.Pool
 	cfg *config.Config
@@ -93,6 +97,23 @@ func (s *Session) HLine() {
 	}
 	s.Write(line)
 	s.Write([]byte("\r\n"))
+}
+
+// AttachControl marks this session as a web session and provides the sender
+// for JSON control messages to its browser (text frames on the terminal WS).
+func (s *Session) AttachControl(fn func(v any) error) {
+	s.ctrl = fn
+}
+
+// IsWeb reports whether this session's client is the web frontend — the only
+// client with a graphical surface for calls.
+func (s *Session) IsWeb() bool { return s.ctrl != nil }
+
+// SendControl delivers a control message to the web client; a no-op on SSH.
+func (s *Session) SendControl(v any) {
+	if s.ctrl != nil {
+		s.ctrl(v)
+	}
 }
 
 // SetState updates what this session is "doing" (shown in w).

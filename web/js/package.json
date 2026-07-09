@@ -1,0 +1,4 @@
+{
+  "//": "Marks web/js as ES modules so Node's test runner can import the browser codec files directly. Not used by the browser and not part of any build step.",
+  "type": "module"
+}

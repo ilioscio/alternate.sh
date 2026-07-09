@@ -1,0 +1,92 @@
+// Theme definitions shared by the terminal (xterm.js) and the call panel
+// (canvas tinting). The CSS custom properties in index.html are the third
+// copy of these palettes; keep all three in step when adding a theme.
+
+export const xtermThemes = {
+  'phosphor-green': {
+    background:          '#050a05',
+    foreground:          '#33ff33',
+    cursor:              '#33ff33',
+    cursorAccent:        '#050a05',
+    selectionBackground: 'rgba(51,255,51,0.25)',
+    black:    '#050a05', red:          '#1a7a1a',
+    green:    '#33ff33', yellow:       '#80ff80',
+    blue:     '#0d3d0d', magenta:      '#1a7a1a',
+    cyan:     '#33cc33', white:        '#80ff80',
+    brightBlack:   '#1a7a1a', brightRed:    '#33ff33',
+    brightGreen:   '#80ff80', brightYellow: '#ccffcc',
+    brightBlue:    '#33ff33', brightMagenta:'#33ff33',
+    brightCyan:    '#80ff80', brightWhite:  '#ccffcc',
+  },
+  'phosphor-amber': {
+    background:          '#0d0800',
+    foreground:          '#ffb800',
+    cursor:              '#ffb800',
+    cursorAccent:        '#0d0800',
+    selectionBackground: 'rgba(255,184,0,0.25)',
+    black:    '#0d0800', red:          '#8c6500',
+    green:    '#ffb800', yellow:       '#ffd966',
+    blue:     '#402800', magenta:      '#8c6500',
+    cyan:     '#cc9400', white:        '#ffd966',
+    brightBlack:   '#8c6500', brightRed:    '#ffb800',
+    brightGreen:   '#ffd966', brightYellow: '#fff0b3',
+    brightBlue:    '#ffb800', brightMagenta:'#ffb800',
+    brightCyan:    '#ffd966', brightWhite:  '#fff0b3',
+  },
+  'white-paper': {
+    background:          '#f0ebe0',
+    foreground:          '#1a1a1a',
+    cursor:              '#1a1a1a',
+    cursorAccent:        '#f0ebe0',
+    selectionBackground: 'rgba(0,0,0,0.15)',
+    black:    '#1a1a1a', red:          '#8b0000',
+    green:    '#006400', yellow:       '#8b8b00',
+    blue:     '#00008b', magenta:      '#8b008b',
+    cyan:     '#008b8b', white:        '#666666',
+    brightBlack:   '#333333', brightRed:    '#cc0000',
+    brightGreen:   '#009900', brightYellow: '#cccc00',
+    brightBlue:    '#0000cc', brightMagenta:'#cc00cc',
+    brightCyan:    '#00cccc', brightWhite:  '#1a1a1a',
+  },
+  'blue-steel': {
+    background:          '#000814',
+    foreground:          '#4488ff',
+    cursor:              '#4488ff',
+    cursorAccent:        '#000814',
+    selectionBackground: 'rgba(68,136,255,0.25)',
+    black:    '#000814', red:          '#1a3a8c',
+    green:    '#4488ff', yellow:       '#88aaff',
+    blue:     '#0a1f6d', magenta:      '#1a3a8c',
+    cyan:     '#3366cc', white:        '#88aaff',
+    brightBlack:   '#1a3a8c', brightRed:    '#4488ff',
+    brightGreen:   '#88aaff', brightYellow: '#ccdaff',
+    brightBlue:    '#4488ff', brightMagenta:'#4488ff',
+    brightCyan:    '#88aaff', brightWhite:  '#ccdaff',
+  },
+  'white-black': {
+    background:          '#000000',
+    foreground:          '#ffffff',
+    cursor:              '#ffffff',
+    cursorAccent:        '#000000',
+    selectionBackground: 'rgba(255,255,255,0.25)',
+    black:    '#000000', red:          '#cc0000',
+    green:    '#00cc00', yellow:       '#cccc00',
+    blue:     '#0000cc', magenta:      '#cc00cc',
+    cyan:     '#00cccc', white:        '#cccccc',
+    brightBlack:   '#555555', brightRed:    '#ff5555',
+    brightGreen:   '#55ff55', brightYellow: '#ffff55',
+    brightBlue:    '#5555ff', brightMagenta:'#ff55ff',
+    brightCyan:    '#55ffff', brightWhite:  '#ffffff',
+  },
+};
+
+// phosphorRGB gives the call panel's video tint per theme: a lit 1-bit pixel
+// renders as fg on bg, so a call looks like another window on the same
+// imagined machine.
+export const phosphorRGB = {
+  'phosphor-green': { fg: [0x33, 0xff, 0x33], bg: [0x05, 0x0a, 0x05] },
+  'phosphor-amber': { fg: [0xff, 0xb8, 0x00], bg: [0x0d, 0x08, 0x00] },
+  'white-paper':    { fg: [0x1a, 0x1a, 0x1a], bg: [0xf0, 0xeb, 0xe0] },
+  'blue-steel':     { fg: [0x44, 0x88, 0xff], bg: [0x00, 0x08, 0x14] },
+  'white-black':    { fg: [0xff, 0xff, 0xff], bg: [0x00, 0x00, 0x00] },
+};

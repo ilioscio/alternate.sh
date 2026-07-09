@@ -11,11 +11,25 @@ adjusting the tests.
 | Go unit tests | `internal/valid/valid_test.go` | `go test ./internal/valid/` | Username/password/email validation + disposable-domain blocking |
 | Go unit tests | `internal/email/email_test.go` | `go test ./internal/email/` | SMTP message building (header-injection guard) + full send over a mock sink |
 | Go unit tests | `internal/ratelimit/ratelimit_test.go` | `go test ./internal/ratelimit/` | Sliding-window per-key limiter |
+| Go unit tests | `internal/av/*_test.go` | `go test ./internal/av/` | Media codecs (dither, PackBits, video key/delta, ADPCM): round trips, drop recovery, idle bitrate, shared-vector conformance, JS-mask parity |
+| Go unit tests | `internal/calls/calls_test.go` | `go test ./internal/calls/` | Call signaling: ring/accept/hangup lifecycle, busy, ring timeout, rate limit, param clamping |
+| Go unit tests | `internal/server/callws_test.go` | `go test ./internal/server/` | `/ws/call` media relay: auth, packet fan-out, source-spoof rejection, teardown both directions |
+| Go unit tests | `internal/federation/call_test.go` | `go test ./internal/federation/` | Cross-node CALL_OPEN over real TLS: deferred accept, decline, cancel, decodable media across the bridge |
+| JS codec parity tests | `web/js/test/codecs.test.mjs` | `node --test web/js/test/*.test.mjs` (also `nix build .#checks.<sys>.codecs-js`) | Browser codecs match `internal/av` byte-for-byte on `internal/av/testdata/vectors.json` |
 | NixOS VM integration test | `nix/tests.nix` | `nix build .#checks.x86_64-linux.commands` | Every shell command, end to end, over real SSH with a real PostgreSQL |
 | NixOS VM integration test | `nix/tests-signup.nix` | `nix build .#checks.x86_64-linux.signup` | Web self-signup → email → confirm (code + link) → login, with mailpit as SMTP sink |
+| NixOS VM integration test | `nix/tests-federation.nix` | `nix build .#checks.x86_64-linux.federation` | Two-node peering, cross-node finger/rwho/talk, and a full cross-node call: scripted web clients place/answer via the REPL, exchange media over `/ws/call`→ASSP, and hang up |
 
-Both run as part of `nix flake check` (the VM test on Linux systems only —
+All run as part of `nix flake check` (the VM tests on Linux systems only —
 NixOS VM tests cannot run on darwin).
+
+**Codec parity convention:** the browser codecs (`web/js/*.js`) and the Go
+twins (`internal/av/`) are locked together by the committed vectors in
+`internal/av/testdata/vectors.json`. Any intentional codec change must be
+made in both implementations, then regenerate vectors with
+`go test ./internal/av -run TestVectors -update` and re-run both suites. The
+blue-noise mask is generated (`go generate ./internal/av`) into both
+languages at once; `TestBlueNoiseMaskParity` fails if they ever diverge.
 
 ---
 

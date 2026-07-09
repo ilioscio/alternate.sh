@@ -14,6 +14,7 @@ type Config struct {
 	Database   DatabaseConfig   `toml:"database"`
 	Email      EmailConfig      `toml:"email"`
 	Federation FederationConfig `toml:"federation"`
+	Calls      CallsConfig      `toml:"calls"`
 	Limits     LimitsConfig     `toml:"limits"`
 }
 
@@ -65,6 +66,16 @@ type FederationConfig struct {
 	Enabled  bool `toml:"enabled"`
 }
 
+// CallsConfig configures the live A/V layer (DESIGN.md §9). Width/Height/FPS
+// are this node's video ceiling: local calls use them directly, and
+// cross-node negotiation clamps a caller's proposal to them (never upward).
+type CallsConfig struct {
+	Enabled bool `toml:"enabled"`
+	Width   int  `toml:"width"`  // pixels; multiple of 8
+	Height  int  `toml:"height"` // pixels
+	FPS     int  `toml:"fps"`
+}
+
 type LimitsConfig struct {
 	MaxUsers    int `toml:"max_users"`
 	MailPerHour int `toml:"mail_per_hour"`
@@ -93,6 +104,7 @@ func defaults() *Config {
 		Database: DatabaseConfig{MaxConns: 25},
 		Email:      EmailConfig{Port: 465, From: "noreply@ilios.dev"},
 		Federation: FederationConfig{ASSPPort: 4119},
+		Calls:      CallsConfig{Enabled: true, Width: 128, Height: 96, FPS: 24},
 		Limits:     LimitsConfig{MaxUsers: 500, MailPerHour: 50, NewsPerDay: 20},
 	}
 }

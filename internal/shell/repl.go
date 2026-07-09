@@ -127,7 +127,7 @@ func renderNotice(n presence.WriteNotice) string {
 	case presence.NoticeBiff:
 		// Single-line alert, no EOF marker.
 		return fmt.Sprintf("\r\n\x1b[36mNew mail from %s [%s]: %s\x1b[0m\r\n", n.From, ts, n.Message)
-	case presence.NoticeTalk:
+	case presence.NoticeTalk, presence.NoticeCall:
 		return fmt.Sprintf("\r\n\x1b[35m%s [%s]\x1b[0m\r\n", n.Message, ts)
 	default: // NoticeWrite
 		sb.WriteString("\x1b[33m") // yellow

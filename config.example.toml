@@ -16,9 +16,16 @@ dsn = "postgres://alternateuser:pass@localhost/alternatedb?sslmode=disable"
 
 [federation]
 assp_port = 4119
-nntp_port = 119
-smtp_port = 25
 enabled   = false
+
+# Live A/V calls (web client only; see DESIGN.md §9). width/height/fps are
+# this node's video ceiling: cross-node negotiation clamps a caller's
+# proposal to these values, never above them.
+[calls]
+enabled = true
+width   = 128   # pixels; must be a multiple of 8
+height  = 96
+fps     = 24
 
 [limits]
 max_users    = 500
