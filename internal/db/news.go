@@ -20,8 +20,8 @@ type Article struct {
 	ID          string
 	NewsgroupID string
 	GroupName   string
-	AuthorID    string
-	AuthorName  string
+	AuthorID    *string // nil for federated articles
+	AuthorName  string  // local username, or the qualified remote author
 	Subject     string
 	Body        string
 	ParentID    *string
@@ -29,6 +29,10 @@ type Article struct {
 	Read        bool
 	Depth       int
 	CreatedAt   time.Time
+
+	// Federation identity: nil OriginNode means authored on this node.
+	OriginNode *string
+	OriginID   *string
 }
 
 func GetNewsgroups(ctx context.Context, pool *pgxpool.Pool, userID string) ([]Newsgroup, error) {
@@ -74,25 +78,28 @@ func GetNewsgroupByName(ctx context.Context, pool *pgxpool.Pool, name string) (*
 func GetArticles(ctx context.Context, pool *pgxpool.Pool, groupID, userID string) ([]Article, error) {
 	rows, err := pool.Query(ctx, `
 		WITH RECURSIVE thread AS (
-		    SELECT id, newsgroup_id, author_id, subject, body, parent_id, cancelled, created_at,
+		    SELECT id, newsgroup_id, author_id, remote_author, subject, body, parent_id, cancelled, created_at,
+		           origin_node, origin_id,
 		           0 AS depth, id AS thread_root, created_at AS root_ts
 		    FROM articles
 		    WHERE newsgroup_id = $1 AND parent_id IS NULL AND NOT cancelled
 
 		    UNION ALL
 
-		    SELECT a.id, a.newsgroup_id, a.author_id, a.subject, a.body, a.parent_id, a.cancelled, a.created_at,
+		    SELECT a.id, a.newsgroup_id, a.author_id, a.remote_author, a.subject, a.body, a.parent_id, a.cancelled, a.created_at,
+		           a.origin_node, a.origin_id,
 		           t.depth + 1, t.thread_root, t.root_ts
 		    FROM articles a
 		    JOIN thread t ON t.id = a.parent_id
 		    WHERE NOT a.cancelled
 		)
-		SELECT t.id, t.newsgroup_id, ng.name, t.author_id, u.username,
+		SELECT t.id, t.newsgroup_id, ng.name, t.author_id, COALESCE(u.username, t.remote_author, '?'),
 		       t.subject, t.body, t.parent_id, t.cancelled, t.created_at, t.depth,
-		       EXISTS(SELECT 1 FROM article_reads ar WHERE ar.article_id = t.id AND ar.user_id = $2) AS read
+		       EXISTS(SELECT 1 FROM article_reads ar WHERE ar.article_id = t.id AND ar.user_id = $2) AS read,
+		       t.origin_node, t.origin_id
 		FROM thread t
 		JOIN newsgroups ng ON ng.id = t.newsgroup_id
-		JOIN users u ON u.id = t.author_id
+		LEFT JOIN users u ON u.id = t.author_id
 		ORDER BY t.root_ts, t.thread_root, t.depth, t.created_at`,
 		groupID, userID)
 	if err != nil {
@@ -104,7 +111,8 @@ func GetArticles(ctx context.Context, pool *pgxpool.Pool, groupID, userID string
 	for rows.Next() {
 		var a Article
 		if err := rows.Scan(&a.ID, &a.NewsgroupID, &a.GroupName, &a.AuthorID, &a.AuthorName,
-			&a.Subject, &a.Body, &a.ParentID, &a.Cancelled, &a.CreatedAt, &a.Depth, &a.Read); err != nil {
+			&a.Subject, &a.Body, &a.ParentID, &a.Cancelled, &a.CreatedAt, &a.Depth, &a.Read,
+			&a.OriginNode, &a.OriginID); err != nil {
 			return nil, err
 		}
 		arts = append(arts, a)
@@ -115,14 +123,16 @@ func GetArticles(ctx context.Context, pool *pgxpool.Pool, groupID, userID string
 func GetArticle(ctx context.Context, pool *pgxpool.Pool, articleID string) (*Article, error) {
 	a := &Article{}
 	err := pool.QueryRow(ctx, `
-		SELECT a.id, a.newsgroup_id, ng.name, a.author_id, u.username,
-		       a.subject, a.body, a.parent_id, a.cancelled, a.created_at, 0, false
+		SELECT a.id, a.newsgroup_id, ng.name, a.author_id, COALESCE(u.username, a.remote_author, '?'),
+		       a.subject, a.body, a.parent_id, a.cancelled, a.created_at, 0, false,
+		       a.origin_node, a.origin_id
 		FROM articles a
 		JOIN newsgroups ng ON ng.id = a.newsgroup_id
-		JOIN users u ON u.id = a.author_id
+		LEFT JOIN users u ON u.id = a.author_id
 		WHERE a.id = $1`, articleID,
 	).Scan(&a.ID, &a.NewsgroupID, &a.GroupName, &a.AuthorID, &a.AuthorName,
-		&a.Subject, &a.Body, &a.ParentID, &a.Cancelled, &a.CreatedAt, &a.Depth, &a.Read)
+		&a.Subject, &a.Body, &a.ParentID, &a.Cancelled, &a.CreatedAt, &a.Depth, &a.Read,
+		&a.OriginNode, &a.OriginID)
 	if err != nil {
 		return nil, err
 	}
@@ -155,11 +165,14 @@ func CancelArticle(ctx context.Context, pool *pgxpool.Pool, articleID, authorID 
 	var tag string
 	var err error
 	if isAdmin {
-		res, e := pool.Exec(ctx, `UPDATE articles SET cancelled = true WHERE id = $1`, articleID)
+		res, e := pool.Exec(ctx,
+			`UPDATE articles SET cancelled = true, updated_at = NOW() WHERE id = $1`, articleID)
 		err = e
 		tag = res.String()
 	} else {
-		res, e := pool.Exec(ctx, `UPDATE articles SET cancelled = true WHERE id = $1 AND author_id = $2`, articleID, authorID)
+		res, e := pool.Exec(ctx,
+			`UPDATE articles SET cancelled = true, updated_at = NOW() WHERE id = $1 AND author_id = $2`,
+			articleID, authorID)
 		err = e
 		tag = res.String()
 	}

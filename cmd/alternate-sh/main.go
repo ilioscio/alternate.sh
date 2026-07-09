@@ -14,6 +14,7 @@ import (
 	"github.com/ilioscio/alternate.sh/internal/db"
 	"github.com/ilioscio/alternate.sh/internal/presence"
 	"github.com/ilioscio/alternate.sh/internal/server"
+	"github.com/ilioscio/alternate.sh/internal/shell"
 )
 
 func main() {
@@ -97,6 +98,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("federation: %w", err)
 		}
 		go func() { errCh <- fedSrv.ListenAndServe() }()
+
+		// Outbound mail/news workers + the shell's hook into them.
+		shell.Federation = fedSrv.Sync()
+		go fedSrv.Sync().Run()
 	}
 
 	select {

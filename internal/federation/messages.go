@@ -4,7 +4,11 @@
 // internal/assp.
 package federation
 
-import "github.com/ilioscio/alternate.sh/internal/calls"
+import (
+	"encoding/json"
+
+	"github.com/ilioscio/alternate.sh/internal/calls"
+)
 
 // Control verbs.
 const (
@@ -21,6 +25,10 @@ type Request struct {
 
 	Media  string        `json:"media,omitempty"`  // used by CALL_OPEN
 	Params *calls.Params `json:"params,omitempty"` // used by CALL_OPEN
+
+	// Data carries verb-specific payloads for the mail/news sync verbs,
+	// keeping this envelope from sprouting a field per verb.
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 // PresenceEntry is one logged-in user as reported by a node's WHO.

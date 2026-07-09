@@ -20,7 +20,12 @@ import (
 type FederationServer struct {
 	addr string
 	srv  *federation.Server
+	sync *FedSync
 }
+
+// Sync exposes the outbound mail/news workers (started by main, and handed
+// to the shell as its FederationNotifier).
+func (f *FederationServer) Sync() *FedSync { return f.sync }
 
 // NewFederation constructs the ASSP server: an ephemeral self-signed TLS cert
 // (trust is the peering secret + channel binding, not PKI), a per-peer secret
@@ -48,9 +53,19 @@ func NewFederation(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, 
 	srv.OnCallOpen = func(peerNode string, req federation.CallOpenRequest, ac *assp.Conn) {
 		handleIncomingCall(cfg, hub, peerNode, req, ac)
 	}
+
+	// Mail & news sync (§8.4): inbound handlers here, outbound workers in
+	// FedSync.Run (started by main).
+	fs := NewFedSync(ctx, cfg, pool, hub)
+	srv.OnMailDeliver = fs.handleMailDeliver
+	srv.OnNewsArticle = fs.handleNewsArticle
+	srv.OnNewsCancel = fs.handleNewsCancel
+	srv.OnNewsSince = fs.handleNewsSince
+
 	return &FederationServer{
 		addr: fmt.Sprintf(":%d", cfg.Federation.ASSPPort),
 		srv:  srv,
+		sync: fs,
 	}, nil
 }
 

@@ -170,7 +170,7 @@ func mailbox(s *Session) error {
 }
 
 func printMailList(s *Session, msgs []db.MailMessage) {
-	s.Printf("  %-3s  %-16s  %-36s  %s\r\n", "N", "From", "Subject", "Date")
+	s.Printf("  %-3s  %-22s  %-30s  %s\r\n", "N", "From", "Subject", "Date")
 	s.HLine()
 	for i, m := range msgs {
 		unread := " "
@@ -178,14 +178,15 @@ func printMailList(s *Session, msgs []db.MailMessage) {
 			unread = "*"
 		}
 		subj := m.Subject
-		if len(subj) > 36 {
-			subj = subj[:33] + "..."
+		if len(subj) > 30 {
+			subj = subj[:27] + "..."
 		}
+		// From may be a qualified remote address (user@host).
 		from := m.SenderName
-		if len(from) > 16 {
-			from = from[:16]
+		if len(from) > 22 {
+			from = from[:22]
 		}
-		s.Printf("  %s%3d  %-16s  %-36s  %s\r\n",
+		s.Printf("  %s%3d  %-22s  %-30s  %s\r\n",
 			unread, i+1, from, subj,
 			m.CreatedAt.Local().Format("Jan 2 15:04"),
 		)
@@ -208,13 +209,20 @@ func showMessage(s *Session, m *db.MailMessage) {
 }
 
 func composeMail(s *Session, recipientName, subject string, inReplyTo *string) error {
-	// Anti-spam: cap messages per hour for non-admins.
+	// Anti-spam: cap messages per hour for non-admins. Queued cross-node
+	// mail counts too — the outbox is not a loophole.
 	if !s.User.Admin && s.cfg.Limits.MailPerHour > 0 {
 		n, _ := db.CountMailSentSince(s.ctx, s.db, s.User.ID, "1 hour")
-		if n >= s.cfg.Limits.MailPerHour {
+		q, _ := db.CountOutboxQueuedSince(s.ctx, s.db, s.User.ID, "1 hour")
+		if n+q >= s.cfg.Limits.MailPerHour {
 			s.Printf("mail: hourly send limit reached (%d/hour). Try again later.\r\n", s.cfg.Limits.MailPerHour)
 			return nil
 		}
+	}
+
+	// Cross-node mail (user@host) queues into the outbox (§8.4).
+	if strings.Contains(recipientName, "@") {
+		return composeRemoteMail(s, recipientName, subject)
 	}
 
 	// Look up recipient
@@ -269,6 +277,68 @@ func composeMail(s *Session, recipientName, subject string, inReplyTo *string) e
 			s.Printf("[Auto-reply from %s received]\r\n", u.Username)
 		}
 	}
+	return nil
+}
+
+// composeRemoteMail composes mail to user@host and queues it for federated
+// delivery. Delivery is asynchronous — the outbox worker attempts it
+// immediately, retries with backoff, and bounces via MAILER-DAEMON if the
+// peer stays unreachable for a day.
+func composeRemoteMail(s *Session, target, subject string) error {
+	if !s.cfg.Federation.Enabled {
+		s.Println("mail: federation is disabled on this node")
+		return nil
+	}
+	at := strings.LastIndex(target, "@")
+	remoteUser, host := target[:at], target[at+1:]
+	if remoteUser == "" || host == "" {
+		s.Println("mail: usage: mail user@host")
+		return nil
+	}
+	if host == s.cfg.Server.Hostname {
+		// Mail to ourselves-as-a-host (including replies to MAILER-DAEMON).
+		s.Printf("mail: %s is this node — use 'mail %s'\r\n", host, remoteUser)
+		return nil
+	}
+	if _, err := db.GetPeer(s.ctx, s.db, host); err != nil {
+		s.Printf("mail: %s: not a federation peer\r\n", host)
+		return nil
+	}
+
+	s.Printf("To: %s\r\n", target)
+	if subject == "" {
+		s.Print("Subject: ")
+		rl := s.newRL()
+		subject, _ = rl.ReadLine("")
+		if subject == "" {
+			subject = "(no subject)"
+		}
+	} else {
+		s.Printf("Subject: %s\r\n", subject)
+	}
+
+	body := readBody(s, "Message (end with '.' on a line by itself):")
+	if body == "" {
+		s.Println("Cancelled — empty message.")
+		return nil
+	}
+	if s.User.Signature != "" {
+		body += "\n\n-- \n" + s.User.Signature
+	}
+
+	if !confirm(s, fmt.Sprintf("Send to %s? [y/n]: ", target)) {
+		s.Println("Cancelled.")
+		return nil
+	}
+
+	if err := db.EnqueueOutboxMail(s.ctx, s.db, s.User.ID, host, remoteUser, subject, body); err != nil {
+		s.Println("mail: error queueing message")
+		return nil
+	}
+	if Federation != nil {
+		Federation.MailQueued()
+	}
+	s.Printf("Mail to %s queued for delivery.\r\n", target)
 	return nil
 }
 

@@ -27,6 +27,13 @@ type Server struct {
 	// OnCallOpen, if set, handles an inbound cross-node call the same way —
 	// but the handler's response is deferred until the callee answers.
 	OnCallOpen func(peerNode string, req CallOpenRequest, ac *assp.Conn)
+
+	// Mail/news sync handlers (DESIGN.md §8.4): plain request/response, the
+	// serve loop keeps the connection. Nil handlers refuse the verb.
+	OnMailDeliver func(peerNode string, req MailDeliverRequest) MailDeliverResponse
+	OnNewsArticle func(peerNode string, art WireArticle) NewsArticleResponse
+	OnNewsCancel  func(peerNode string, originID string)
+	OnNewsSince   func(peerNode string, since int64) NewsSinceResponse
 }
 
 // NewServer builds a federation server. node is this node's ASSP identity,
@@ -99,6 +106,9 @@ func (s *Server) serve(ac *assp.Conn, peer string) bool {
 			s.handleCallOpen(ac, peer, req)
 			return true // call handler (or its rejection) owns the connection now
 		}
+		if s.dispatchSync(ac, peer, req) {
+			continue
+		}
 		s.dispatch(ac, req)
 	}
 }
@@ -129,6 +139,8 @@ func (s *Server) handleCallOpen(ac *assp.Conn, peer string, req Request) {
 }
 
 func (s *Server) dispatch(ac *assp.Conn, req Request) {
+	// The peer's authenticated node name travels with every sync dispatch;
+	// payloads never carry (or override) identity.
 	switch req.Verb {
 	case VerbWho:
 		s.respond(ac, req.ID, WhoResponse{Node: s.node, Users: s.src.Who()})
@@ -139,6 +151,68 @@ func (s *Server) dispatch(ac *assp.Conn, req Request) {
 		ac.Write(assp.ControlChannel, assp.TypeError, 0,
 			[]byte(fmt.Sprintf("unknown verb %q", req.Verb)))
 	}
+}
+
+// dispatchSync handles the mail/news verbs; returns false if req isn't one.
+func (s *Server) dispatchSync(ac *assp.Conn, peer string, req Request) bool {
+	refuse := func(what string) {
+		ac.Write(assp.ControlChannel, assp.TypeError, 0,
+			[]byte(fmt.Sprintf("%s not available", what)))
+	}
+	switch req.Verb {
+	case VerbMailSend:
+		if s.OnMailDeliver == nil {
+			refuse("mail")
+			return true
+		}
+		var mr MailDeliverRequest
+		if json.Unmarshal(req.Data, &mr) != nil {
+			refuse("mail")
+			return true
+		}
+		s.respond(ac, req.ID, s.OnMailDeliver(peer, mr))
+
+	case VerbNewsArticle:
+		if s.OnNewsArticle == nil {
+			refuse("news")
+			return true
+		}
+		var art WireArticle
+		if json.Unmarshal(req.Data, &art) != nil {
+			refuse("news")
+			return true
+		}
+		s.respond(ac, req.ID, s.OnNewsArticle(peer, art))
+
+	case VerbNewsCancel:
+		if s.OnNewsCancel == nil {
+			refuse("news")
+			return true
+		}
+		var cr NewsCancelRequest
+		if json.Unmarshal(req.Data, &cr) != nil {
+			refuse("news")
+			return true
+		}
+		s.OnNewsCancel(peer, cr.OriginID)
+		s.respond(ac, req.ID, NewsArticleResponse{OK: true})
+
+	case VerbNewsSince:
+		if s.OnNewsSince == nil {
+			refuse("news")
+			return true
+		}
+		var sr NewsSinceRequest
+		if json.Unmarshal(req.Data, &sr) != nil {
+			refuse("news")
+			return true
+		}
+		s.respond(ac, req.ID, s.OnNewsSince(peer, sr.Since))
+
+	default:
+		return false
+	}
+	return true
 }
 
 func (s *Server) respond(ac *assp.Conn, id uint32, v any) {

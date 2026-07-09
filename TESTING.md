@@ -18,7 +18,8 @@ adjusting the tests.
 | JS codec parity tests | `web/js/test/codecs.test.mjs` | `node --test web/js/test/*.test.mjs` (also `nix build .#checks.<sys>.codecs-js`) | Browser codecs match `internal/av` byte-for-byte on `internal/av/testdata/vectors.json` |
 | NixOS VM integration test | `nix/tests.nix` | `nix build .#checks.x86_64-linux.commands` | Every shell command, end to end, over real SSH with a real PostgreSQL |
 | NixOS VM integration test | `nix/tests-signup.nix` | `nix build .#checks.x86_64-linux.signup` | Web self-signup → email → confirm (code + link) → login, with mailpit as SMTP sink |
-| NixOS VM integration test | `nix/tests-federation.nix` | `nix build .#checks.x86_64-linux.federation` | Two-node peering, cross-node finger/rwho/talk, and a full cross-node call: scripted web clients place/answer via the REPL, exchange media over `/ws/call`→ASSP, and hang up |
+| Go unit tests | `internal/federation/sync_test.go` | `go test ./internal/federation/` | Mail/news federation verbs over real TLS: MAIL_SEND (delivery, permanent rejection, vacation-in-response), NEWS_ARTICLE/CANCEL, NEWS_SINCE batching and mark resume |
+| NixOS VM integration test | `nix/tests-federation.nix` | `nix build .#checks.x86_64-linux.federation` | Two-node peering, cross-node finger/rwho/talk, a full cross-node call (scripted web clients over `/ws/call`→ASSP), and federated mail & news: queued delivery + reply, MAILER-DAEMON bounce, cross-node vacation auto-reply, article propagation + threading + cancel, catch-up sync across a service restart, and local-namespace containment |
 
 All run as part of `nix flake check` (the VM tests on Linux systems only —
 NixOS VM tests cannot run on darwin).

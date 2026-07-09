@@ -104,7 +104,7 @@ func helpForCommand(s *Session, cmd string) error {
 		"public":   "public [user]          — edit or read a public page",
 		"passwd":   "passwd                 — change your password",
 		"chfn":     "chfn                   — change finger information",
-		"mail":     "mail [user]            — read your mailbox, or send mail to a user",
+		"mail":     "mail [user[@host]]     — read your mailbox, or send mail (cross-node mail is queued)",
 		"biff":     "biff [y|n]             — toggle new-mail notifications during your session",
 		"vacation": "vacation [on|off|msg]  — manage your vacation auto-reply",
 		"news":     "news                   — browse newsgroups and read articles",

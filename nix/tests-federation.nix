@@ -127,6 +127,19 @@ pkgs.testers.runNixOSTest {
                 print("---- transcript ----\n" + out + "\n--------------------")
                 raise AssertionError(f"expected {n!r} in output")
 
+    def psql(machine, query):
+        return machine.succeed(
+            f"runuser -u alternate-sh -- psql -d alternate-sh -tAc \"{query}\""
+        ).strip()
+
+    def psql_check(query, want):
+        # A shell command for wait_until_succeeds: true when the query
+        # returns exactly `want`.
+        return (
+            f"runuser -u alternate-sh -- psql -d alternate-sh -tAc \"{query}\""
+            f" | grep -qx '{want}'"
+        )
+
     for m in (nodea, nodeb):
         m.wait_for_unit("postgresql.service")
         m.wait_for_unit("alternate-sh.service")
@@ -216,11 +229,18 @@ pkgs.testers.runNixOSTest {
 
     # ── The A/V layer (§9) ────────────────────────────────────────────────────
     with subtest("call panel assets are served by the embedded frontend"):
-        nodea.succeed("curl -sf http://127.0.0.1:8080/js/app.js | grep -q connectWS")
-        nodea.succeed("curl -sf http://127.0.0.1:8080/js/call.js | grep -q 'call-start'")
-        nodea.succeed("curl -sf http://127.0.0.1:8080/js/bluenoise.js | grep -q BLUE_NOISE_MASK")
-        nodea.succeed("curl -sf http://127.0.0.1:8080/js/worklets.js | grep -q capture-processor")
-        nodea.succeed("curl -sf http://127.0.0.1:8080/ | grep -q call-panel")
+        # Fetch to a file, then grep: piping curl into `grep -q` races EPIPE
+        # (grep exits at first match, curl fails with code 23 under pipefail).
+        def asset_has(path, needle):
+            nodea.succeed(
+                f"curl -sf http://127.0.0.1:8080{path} -o /tmp/asset"
+                f" && grep -q '{needle}' /tmp/asset"
+            )
+        asset_has("/js/app.js", "connectWS")
+        asset_has("/js/call.js", "call-start")
+        asset_has("/js/bluenoise.js", "BLUE_NOISE_MASK")
+        asset_has("/js/worklets.js", "capture-processor")
+        asset_has("/", "call-panel")
 
     with subtest("call over ssh explains the web requirement"):
         out = sh(nodea, "alice", "alicepass123", ["call bob@nodeb"])
@@ -257,5 +277,115 @@ pkgs.testers.runNixOSTest {
             "MEDIA-RECV " + (bytes([1, 0]).hex() + body),  # from alice (source 0)
             "MEDIA-CLOSED", "DONE",
         )
+
+    # ── Federated mail (§8.4) ─────────────────────────────────────────────────
+    with subtest("cross-node mail: queued, delivered, read on the peer"):
+        out = sh(nodea, "alice", "alicepass123", [
+            "mail bob@nodeb", "FEDMAIL-SUBJ", "FEDMAIL-BODY", ".", "y",
+        ])
+        expect(out, "To: bob@nodeb", "queued for delivery")
+        nodeb.wait_until_succeeds(psql_check(
+            "SELECT count(*) FROM mail WHERE remote_sender='alice@nodea'", "1"
+        ), timeout=60)
+        out = sh(nodeb, "bob", "bobpass12345", ["mail", "1", "q"])
+        expect(out, "alice@nodea", "FEDMAIL-SUBJ", "FEDMAIL-BODY")
+
+    with subtest("cross-node mail: reply routes back over federation"):
+        out = sh(nodeb, "bob", "bobpass12345", [
+            "mail", "r1", "FEDREPLY-BODY", ".", "y", "q",
+        ])
+        expect(out, "queued for delivery")
+        nodea.wait_until_succeeds(psql_check(
+            "SELECT count(*) FROM mail WHERE remote_sender='bob@nodeb'", "1"
+        ), timeout=60)
+        out = sh(nodea, "alice", "alicepass123", ["mail", "1", "q"])
+        expect(out, "bob@nodeb", "Re: FEDMAIL-SUBJ", "FEDREPLY-BODY")
+
+    with subtest("cross-node mail: unknown user bounces via MAILER-DAEMON"):
+        out = sh(nodea, "alice", "alicepass123", [
+            "mail ghost@nodeb", "GHOST-SUBJ", "GHOST-BODY", ".", "y",
+        ])
+        expect(out, "queued for delivery")
+        nodea.wait_until_succeeds(psql_check(
+            "SELECT count(*) FROM mail WHERE remote_sender='MAILER-DAEMON@nodea'", "1"
+        ), timeout=60)
+        out = sh(nodea, "alice", "alicepass123", ["mail", "1", "q"])
+        expect(out, "MAILER-DAEMON", "Returned mail: GHOST-SUBJ", "no such user")
+
+    with subtest("cross-node vacation auto-reply"):
+        sh(nodeb, "bob", "bobpass12345", [
+            "vacation msg", "FEDVAC-CANARY", ".", "vacation on",
+        ])
+        out = sh(nodea, "alice", "alicepass123", [
+            "mail bob@nodeb", "VAC-TRIGGER", "are you there?", ".", "y",
+        ])
+        expect(out, "queued for delivery")
+        nodea.wait_until_succeeds(psql_check(
+            "SELECT count(*) FROM mail WHERE remote_sender='bob@nodeb'"
+            " AND subject='Auto-reply: VAC-TRIGGER'", "1"
+        ), timeout=60)
+        out = sh(nodea, "alice", "alicepass123", ["mail", "1", "q"])
+        expect(out, "Auto-reply: VAC-TRIGGER", "FEDVAC-CANARY")
+        sh(nodeb, "bob", "bobpass12345", ["vacation off"])
+
+    # ── Federated news (§8.4) ─────────────────────────────────────────────────
+    with subtest("news: post on nodea propagates to nodeb"):
+        out = sh(nodea, "alice", "alicepass123", [
+            "post alt.chat", "FEDNEWS-SUBJ", "FEDNEWS-BODY", ".", "y",
+        ])
+        expect(out, "Article posted.")
+        nodeb.wait_until_succeeds(psql_check(
+            "SELECT count(*) FROM articles WHERE remote_author='alice@nodea'"
+            " AND subject='FEDNEWS-SUBJ'", "1"
+        ), timeout=60)
+        out = sh(nodeb, "bob", "bobpass12345", ["news", "alt.chat", "1", "x", "q", "q"])
+        expect(out, "FEDNEWS-SUBJ", "FEDNEWS-BODY", "alice@nodea")
+
+    with subtest("news: cross-node followup threads under the original"):
+        out = sh(nodeb, "bob", "bobpass12345", [
+            "news", "alt.chat", "f1", "FEDNEWS-REPLY", ".", "y", "q", "q",
+        ])
+        expect(out, "Article posted.")
+        nodea.wait_until_succeeds(psql_check(
+            "SELECT count(*) FROM articles WHERE remote_author='bob@nodeb'"
+            " AND parent_id IS NOT NULL", "1"
+        ), timeout=60)
+
+    with subtest("news: cancel propagates to the peer"):
+        out = sh(nodea, "alice", "alicepass123", [
+            "news", "alt.chat", "c1", "y", "q", "q",
+        ])
+        expect(out, "Article cancelled.")
+        nodeb.wait_until_succeeds(psql_check(
+            "SELECT count(*) FROM articles WHERE subject='FEDNEWS-SUBJ'"
+            " AND cancelled", "1"
+        ), timeout=60)
+
+    with subtest("news: catch-up sync recovers posts made while a node was down"):
+        nodeb.succeed("systemctl stop alternate-sh")
+        out = sh(nodea, "alice", "alicepass123", [
+            "post alt.chat", "CATCHUP-SUBJ", "CATCHUP-BODY", ".", "y",
+        ])
+        expect(out, "Article posted.")
+        nodeb.succeed("systemctl start alternate-sh")
+        nodeb.wait_for_unit("alternate-sh.service")
+        # Startup sync pulls everything nodea authored since the last mark.
+        nodeb.wait_until_succeeds(psql_check(
+            "SELECT count(*) FROM articles WHERE subject='CATCHUP-SUBJ'", "1"
+        ), timeout=90)
+
+    with subtest("news: <hostname>.* groups never leave their node"):
+        # The group exists on BOTH nodes, so a refusal is namespace policy,
+        # not a missing group.
+        for m in (nodea, nodeb):
+            psql(m, "INSERT INTO newsgroups (name, description)"
+                    " VALUES ('nodea.local', 'local board') ON CONFLICT DO NOTHING")
+        out = sh(nodea, "alice", "alicepass123", [
+            "post nodea.local", "LOCAL-ONLY-SUBJ", "stays home", ".", "y",
+        ])
+        expect(out, "Article posted.")
+        nodea.sleep(8)  # give any (wrong) push time to land
+        n = psql(nodeb, "SELECT count(*) FROM articles WHERE subject='LOCAL-ONLY-SUBJ'")
+        assert n == "0", f"local-namespace article leaked to the peer ({n} rows)"
   '';
 }

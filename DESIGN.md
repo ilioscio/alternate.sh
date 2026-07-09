@@ -428,9 +428,13 @@ ASSP is a small multiplexed **binary** protocol over TLS. Every frame is an 8-by
 
 `rwho` aggregates logged-in users across the local node and every peer (control-channel `WHO`). `finger user@host` performs a cross-node lookup (`FINGER`). Unreachable peers are noted, never fatal.
 
-### 8.4 Mail & News (planned)
+### 8.4 Mail & News
 
-Cross-node mail (`user@host`) and newsgroup propagation will ride the same ASSP control channel as sync operations, reusing the peer registry and auth. Namespace convention: `<nodename>.local` groups stay local; others federate with willing peers.
+Cross-node mail (`user@host`) and newsgroup propagation ride the ASSP control channel as request/response verbs, reusing the peer registry and peering auth. Nothing here opens a stream channel — these are low-rate, store-and-forward operations.
+
+**Mail (`MAIL_SEND`).** Mail is asynchronous by nature, so delivery is **queued, not synchronous**: `mail nova@peer` composes exactly like local mail, then lands in a local **outbox**. A delivery worker attempts it immediately, and on failure retries with backoff (roughly 1m → 4h) for 24 hours before returning the message to the sender's inbox as a bounce from `MAILER-DAEMON@<host>` — a permanent rejection from the peer ("no such user") bounces immediately. On the receiving node the message is stored with a **remote sender address** (`ilios@nodea`) rather than a local user reference; replying to it routes back over federation the same way. Vacation auto-replies work across nodes: the receiving node includes the vacation message in its delivery response (deduplicated per remote sender per 7 days, as locally), and the sender's node drops it into the sender's inbox. Receiving nodes rate-limit deliveries per peer and per remote sender — peering is trust, not a blank check.
+
+**News (`NEWS_ARTICLE`, `NEWS_CANCEL`, `NEWS_SINCE`).** A group federates when **both nodes carry a group of the same name** — the seeded `alt.*` groups match everywhere — except `<hostname>.*` groups, which never leave their node (§5.6). Creating a group stays a deliberate local act; articles for groups a node doesn't carry (or carries as moderated) are refused. Propagation is **push plus catch-up**: a new post pushes to every peer immediately (fire-and-forget), and a periodic sync — at startup, hourly, and when a peer is added — pulls anything missed while a node was down, using a per-peer high-water mark on the *peer's* clock (no cross-node clock comparison). Every article carries its **origin identity** (`origin node + origin id`), which deduplicates push-vs-sync overlap, resolves cross-node reply threading (an unresolvable parent degrades to a thread root), and scopes `cancel`: only an article's origin node can cancel it remotely, while local admins can always cancel locally (§10.5). Propagation is **direct peers only** — a node relays nothing it didn't author, so there are no flood loops to prevent; a full multi-hop mesh would need Usenet-style path tracking and is deliberately out of scope.
 
 ### 8.5 Talk: Federated Relay
 
@@ -689,11 +693,11 @@ Web-only email-confirmed signup, per-IP rate limiting, disposable-email blocking
 ### Phase 5 — Federation ✅
 All-ASSP: multiplexed binary protocol on 4119 with peer-only HMAC + TLS-channel-binding auth, node registry (`node add/remove/list`), cross-node `rwho` and `finger user@host`, cross-node `talk` relay. No NNTP/SMTP servers (see §8).
 
-### Phase 6 — Retro-Futurism: Live A/V ← NEXT
+### Phase 6 — Retro-Futurism: Live A/V ✅
 `call <user[@host]>`: 1-bit blue-noise-dithered monochrome video (~128×96 @ 24fps) and lofi narrowband audio, both bespoke client-side codecs (with Go twins cross-validated by shared test vectors), streamed over the WebSocket→ASSP substrate reusing the Phase-5 room-to-stream relay. 1:1 first, group-ready. Web-only (first feature outside the terminal emulator). See §9.
 
-### Phase 6.1 — Federated Mail & News
-Cross-node mail (`user@host`) and newsgroup propagation over the ASSP control channel (§8.4), reusing the peer registry and peering auth. Split out of Phase 6 so the A/V work gets undivided attention.
+### Phase 6.1 — Federated Mail & News ✅
+Cross-node mail (`user@host`) and newsgroup propagation over the ASSP control channel (§8.4), reusing the peer registry and peering auth: queued mail with MAILER-DAEMON bounces and cross-node vacation replies, push + catch-up news sync with origin-identity dedupe/threading/cancel, shared-name group federation with `<hostname>.*` containment.
 
-### Phase 7 — Games & Polish
+### Phase 7 — Games & Polish ← NEXT
 Door games framework, initial games, community fortune submission, mailing lists, advanced moderation tools.

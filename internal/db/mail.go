@@ -11,8 +11,8 @@ import (
 
 type MailMessage struct {
 	ID          string
-	SenderID    string
-	SenderName  string
+	SenderID    *string // nil for remote or system (MAILER-DAEMON) senders
+	SenderName  string  // local username, or the qualified remote address
 	RecipientID string
 	Subject     string
 	Body        string
@@ -45,10 +45,10 @@ func SendMail(ctx context.Context, pool *pgxpool.Pool, senderID, recipientID, su
 
 func GetInbox(ctx context.Context, pool *pgxpool.Pool, userID string) ([]MailMessage, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT m.id, m.sender_id, u.username, m.recipient_id,
+		SELECT m.id, m.sender_id, COALESCE(u.username, m.remote_sender, '?'), m.recipient_id,
 		       m.subject, m.body, m.in_reply_to, m.read_at, m.created_at
 		FROM mail m
-		JOIN users u ON u.id = m.sender_id
+		LEFT JOIN users u ON u.id = m.sender_id
 		WHERE m.recipient_id = $1 AND NOT m.deleted_by_recipient
 		ORDER BY m.created_at DESC`, userID)
 	if err != nil {
@@ -86,6 +86,41 @@ func DeleteMailForRecipient(ctx context.Context, pool *pgxpool.Pool, mailID, rec
 	_, err := pool.Exec(ctx,
 		`UPDATE mail SET deleted_by_recipient = true WHERE id = $1 AND recipient_id = $2`,
 		mailID, recipientID)
+	return err
+}
+
+// DeliverRemoteMail stores mail from a remote (or system) sender — a
+// qualified address like "ilios@nodea" or "MAILER-DAEMON@thisnode" — into a
+// local user's inbox.
+func DeliverRemoteMail(ctx context.Context, pool *pgxpool.Pool, remoteSender, recipientID, subject, body string) error {
+	_, err := pool.Exec(ctx, `
+		INSERT INTO mail (remote_sender, recipient_id, subject, body)
+		VALUES ($1, $2, $3, $4)`,
+		remoteSender, recipientID, subject, body)
+	return err
+}
+
+// ShouldSendVacationReplyRemote mirrors ShouldSendVacationReply for senders
+// identified by remote address instead of local user id.
+func ShouldSendVacationReplyRemote(ctx context.Context, pool *pgxpool.Pool, vacationerID, senderAddr string) (bool, error) {
+	var sentAt time.Time
+	err := pool.QueryRow(ctx,
+		`SELECT sent_at FROM vacation_replies_remote WHERE vacationer_id = $1 AND sender_addr = $2`,
+		vacationerID, senderAddr).Scan(&sentAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return time.Since(sentAt) >= 7*24*time.Hour, nil
+}
+
+func RecordVacationReplyRemote(ctx context.Context, pool *pgxpool.Pool, vacationerID, senderAddr string) error {
+	_, err := pool.Exec(ctx, `
+		INSERT INTO vacation_replies_remote (vacationer_id, sender_addr, sent_at) VALUES ($1, $2, NOW())
+		ON CONFLICT (vacationer_id, sender_addr) DO UPDATE SET sent_at = NOW()`,
+		vacationerID, senderAddr)
 	return err
 }
 

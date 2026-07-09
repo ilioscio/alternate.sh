@@ -188,6 +188,11 @@ func browseGroup(s *Session, group *db.Newsgroup) {
 				break
 			}
 			s.Println("Article cancelled.")
+			// Retract from peers — but only for articles this node authored:
+			// a locally-cancelled remote article stays local moderation (§10.5).
+			if Federation != nil && a.OriginNode == nil {
+				Federation.ArticleCancelled(a.ID)
+			}
 			current = -1
 			arts, _ = db.GetArticles(s.ctx, s.db, group.ID, s.User.ID)
 			if len(arts) == 0 {
@@ -343,11 +348,18 @@ func postArticle(s *Session, group *db.Newsgroup, parentID *string, subject stri
 		return
 	}
 
-	if _, err := db.PostArticle(s.ctx, s.db, group.ID, s.User.ID, subject, body, parentID); err != nil {
+	a, err := db.PostArticle(s.ctx, s.db, group.ID, s.User.ID, subject, body, parentID)
+	if err != nil {
 		s.Println("post: error posting article")
 		return
 	}
 	s.Println("Article posted.")
+
+	// Offer the article to peers (§8.4); the push path re-checks whether
+	// the group federates, and catch-up sync covers unreachable peers.
+	if Federation != nil {
+		Federation.ArticlePosted(a.ID)
+	}
 }
 
 func parseNewsNum(s string, max int) (int, bool) {
