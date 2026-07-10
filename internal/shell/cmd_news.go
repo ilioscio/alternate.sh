@@ -6,7 +6,17 @@ import (
 	"strings"
 
 	"github.com/ilioscio/alternate.sh/internal/db"
+	"github.com/ilioscio/alternate.sh/internal/presence"
 )
+
+// notifyUser sends a write-style system notice (moderation outcomes).
+func notifyUser(s *Session, username, message string) {
+	s.hub.Send(username, presence.WriteNotice{
+		Kind:    presence.NoticeWrite,
+		From:    "news",
+		Message: message,
+	})
+}
 
 func cmdNews(s *Session, args []string) error {
 	return browseGroups(s)
@@ -52,16 +62,25 @@ func browseGroups(s *Session) error {
 	}
 	s.Printf("Newsgroups — %d groups, %d unread\r\n\r\n", len(groups), totalUnread)
 	printGroupList(s, groups)
+	printModQueueHint(s)
 
 	rl := s.newRL()
 	for {
-		s.Print("\r\nEnter group name ('q' to quit): ")
+		prompt := "\r\nEnter group name ('q' to quit): "
+		if s.User.Admin {
+			prompt = "\r\nEnter group name ('mq' for the moderation queue, 'q' to quit): "
+		}
+		s.Print(prompt)
 		line, err := rl.ReadLine("")
 		if err != nil || strings.TrimSpace(line) == "q" {
 			return nil
 		}
 		name := strings.TrimSpace(line)
 		if name == "" {
+			continue
+		}
+		if name == "mq" && s.User.Admin {
+			reviewQueue(s)
 			continue
 		}
 
@@ -91,6 +110,16 @@ func browseGroups(s *Session) error {
 			s.Printf("\r\n%d unread articles remain.\r\n", totalUnread)
 		}
 		printGroupList(s, groups)
+	}
+}
+
+// printModQueueHint tells admins when articles await review.
+func printModQueueHint(s *Session) {
+	if !s.User.Admin {
+		return
+	}
+	if pending, err := db.PendingArticles(s.ctx, s.db); err == nil && len(pending) > 0 {
+		s.Printf("\r\n  [%d article(s) awaiting moderation — type 'mq' to review]\r\n", len(pending))
 	}
 }
 
@@ -188,6 +217,11 @@ func browseGroup(s *Session, group *db.Newsgroup) {
 				break
 			}
 			s.Println("Article cancelled.")
+			// Admins cancelling someone else's article is a moderation act.
+			if s.User.Admin && (a.AuthorID == nil || *a.AuthorID != s.User.ID) {
+				db.RecordAudit(s.ctx, s.db, s.User.ID, "article.cancel", a.AuthorName,
+					a.GroupName+": "+a.Subject)
+			}
 			// Retract from peers — but only for articles this node authored:
 			// a locally-cancelled remote article stays local moderation (§10.5).
 			if Federation != nil && a.OriginNode == nil {
@@ -304,10 +338,9 @@ func showArticle(s *Session, a *db.Article) {
 }
 
 func postArticle(s *Session, group *db.Newsgroup, parentID *string, subject string) {
-	if group.Moderated && !s.User.Admin {
-		s.Println("post: this newsgroup is moderated — contact an admin to post")
-		return
-	}
+	// Non-admin posts to moderated groups go to the approval queue rather
+	// than being refused (§10.5).
+	needsApproval := group.Moderated && !s.User.Admin
 
 	// Anti-spam: cap articles per day for non-admins.
 	if !s.User.Admin && s.cfg.Limits.NewsPerDay > 0 {
@@ -348,9 +381,13 @@ func postArticle(s *Session, group *db.Newsgroup, parentID *string, subject stri
 		return
 	}
 
-	a, err := db.PostArticle(s.ctx, s.db, group.ID, s.User.ID, subject, body, parentID)
+	a, err := db.PostArticle(s.ctx, s.db, group.ID, s.User.ID, subject, body, parentID, !needsApproval)
 	if err != nil {
 		s.Println("post: error posting article")
+		return
+	}
+	if needsApproval {
+		s.Printf("Article submitted for moderator review — it appears in %s once approved.\r\n", group.Name)
 		return
 	}
 	s.Println("Article posted.")
@@ -360,6 +397,74 @@ func postArticle(s *Session, group *db.Newsgroup, parentID *string, subject stri
 	if Federation != nil {
 		Federation.ArticlePosted(a.ID)
 	}
+}
+
+// reviewQueue is the admin moderation queue: every unapproved article,
+// oldest first, approve or reject one at a time.
+func reviewQueue(s *Session) {
+	pending, err := db.PendingArticles(s.ctx, s.db)
+	if err != nil {
+		s.Println("news: error reading the moderation queue")
+		return
+	}
+	if len(pending) == 0 {
+		s.Println("Moderation queue is empty.")
+		return
+	}
+
+	rl := s.newRL()
+	for i, a := range pending {
+		s.Println("")
+		s.HLine()
+		s.Printf("  moderation queue — %d of %d\r\n", i+1, len(pending))
+		s.HLine()
+		s.Printf("  Group:   %s\r\n", a.GroupName)
+		s.Printf("  From:    %s\r\n", a.AuthorName)
+		s.Printf("  Date:    %s\r\n", a.CreatedAt.Local().Format("Mon Jan 2 15:04"))
+		s.Printf("  Subject: %s\r\n", a.Subject)
+		s.HLine()
+		for _, line := range strings.Split(a.Body, "\n") {
+			s.Printf("  %s\r\n", line)
+		}
+		s.HLine()
+
+		s.Print("[a=approve, r=reject, s=skip, q=quit] ? ")
+		line, err := rl.ReadLine("")
+		if err != nil {
+			return
+		}
+		switch strings.TrimSpace(strings.ToLower(line)) {
+		case "a":
+			if ok, err := db.ReviewArticle(s.ctx, s.db, a.ID, true); err != nil || !ok {
+				s.Println("news: could not approve")
+				continue
+			}
+			s.Printf("Approved into %s.\r\n", a.GroupName)
+			db.RecordAudit(s.ctx, s.db, s.User.ID, "article.approve", a.AuthorName,
+				a.GroupName+": "+a.Subject)
+			notifyUser(s, a.AuthorName,
+				fmt.Sprintf("news: your article %q was approved into %s", a.Subject, a.GroupName))
+			// Approved articles federate like fresh posts.
+			if Federation != nil {
+				Federation.ArticlePosted(a.ID)
+			}
+		case "r":
+			if ok, err := db.ReviewArticle(s.ctx, s.db, a.ID, false); err != nil || !ok {
+				s.Println("news: could not reject")
+				continue
+			}
+			s.Println("Rejected.")
+			db.RecordAudit(s.ctx, s.db, s.User.ID, "article.reject", a.AuthorName,
+				a.GroupName+": "+a.Subject)
+			notifyUser(s, a.AuthorName,
+				fmt.Sprintf("news: your article %q was not approved for %s", a.Subject, a.GroupName))
+		case "q":
+			return
+		default: // skip
+			continue
+		}
+	}
+	s.Println("(end of queue)")
 }
 
 func parseNewsNum(s string, max int) (int, bool) {

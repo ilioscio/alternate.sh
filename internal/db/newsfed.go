@@ -49,6 +49,7 @@ func LocalArticlesSince(ctx context.Context, pool *pgxpool.Pool, selfNode string
 		JOIN users u ON u.id = a.author_id
 		LEFT JOIN articles p ON p.id = a.parent_id
 		WHERE a.origin_node IS NULL
+		  AND a.approved
 		  AND a.updated_at > $2
 		  AND ng.name NOT LIKE $1 || '.%'
 		ORDER BY a.updated_at

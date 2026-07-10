@@ -157,6 +157,16 @@ func (s *WebSocketServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Banned users see the ban notice, nothing else (§10.5).
+	if u.Banned {
+		msg := "this account has been suspended"
+		if u.BanReason != "" {
+			msg += ": " + u.BanReason
+		}
+		jsonError(w, msg, http.StatusForbidden)
+		return
+	}
+
 	token, err := db.CreateSession(r.Context(), s.pool, u.ID)
 	if err != nil {
 		jsonError(w, "could not create session", http.StatusInternalServerError)
@@ -197,6 +207,11 @@ func (s *WebSocketServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	u, err := s.authFn(r.Context(), token)
 	if err != nil {
 		http.Error(w, "invalid or expired session", http.StatusUnauthorized)
+		return
+	}
+	if u.Banned {
+		// A pre-ban token must not outlive the ban.
+		http.Error(w, "account suspended", http.StatusForbidden)
 		return
 	}
 

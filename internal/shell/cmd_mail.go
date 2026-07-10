@@ -225,6 +225,12 @@ func composeMail(s *Session, recipientName, subject string, inReplyTo *string) e
 		return composeRemoteMail(s, recipientName, subject)
 	}
 
+	// Mailing lists share the username namespace (§5.4): a list-name
+	// recipient fans out to every subscriber.
+	if l, err := db.GetMailingList(s.ctx, s.db, strings.ToLower(recipientName), s.User.ID); err == nil {
+		return composeListMail(s, l)
+	}
+
 	// Look up recipient
 	u, err := db.GetUserByUsername(s.ctx, s.db, recipientName)
 	if err != nil {

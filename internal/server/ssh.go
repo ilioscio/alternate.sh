@@ -84,6 +84,12 @@ func (s *SSHServer) handle(gs gossh.Session) {
 		return
 	}
 
+	// Banned users can connect but see only the ban notice (§10.5).
+	if u.Banned {
+		gs.Write([]byte(banNotice(u.BanReason)))
+		return
+	}
+
 	pty, winCh, hasPTY := gs.Pty()
 	rows, cols := 24, 80
 	if hasPTY {
@@ -111,6 +117,16 @@ func (s *SSHServer) handle(gs gossh.Session) {
 	}
 
 	shell.Run(sess)
+}
+
+// banNotice renders the message a banned user sees instead of a session.
+func banNotice(reason string) string {
+	msg := "\r\nThis account has been suspended.\r\n"
+	if reason != "" {
+		msg += "Reason: " + reason + "\r\n"
+	}
+	msg += "Contact the system administrator if you believe this is a mistake.\r\n\r\n"
+	return msg
 }
 
 func remoteAddr(addr net.Addr) string {

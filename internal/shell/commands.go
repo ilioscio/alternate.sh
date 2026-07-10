@@ -88,6 +88,12 @@ func init() {
 	register("logout", cmdLogout, "exit", "quit", "bye")
 	register("wall", cmdWall)
 	register("node", cmdNode)
+	register("lists", cmdLists)
+	register("subscribe", cmdSubscribe, "sub")
+	register("unsubscribe", cmdUnsubscribe, "unsub")
+	register("ban", cmdBan)
+	register("unban", cmdUnban)
+	register("audit", cmdAudit)
 	registerGames()
 }
 

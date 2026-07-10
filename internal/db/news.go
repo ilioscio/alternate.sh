@@ -38,8 +38,8 @@ type Article struct {
 func GetNewsgroups(ctx context.Context, pool *pgxpool.Pool, userID string) ([]Newsgroup, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT ng.id, ng.name, ng.description, ng.moderated,
-		       COUNT(a.id) FILTER (WHERE NOT a.cancelled)                                        AS total,
-		       COUNT(a.id) FILTER (WHERE NOT a.cancelled AND NOT EXISTS (
+		       COUNT(a.id) FILTER (WHERE NOT a.cancelled AND a.approved)                         AS total,
+		       COUNT(a.id) FILTER (WHERE NOT a.cancelled AND a.approved AND NOT EXISTS (
 		           SELECT 1 FROM article_reads ar WHERE ar.article_id = a.id AND ar.user_id = $1
 		       ))                                                                                AS unread
 		FROM newsgroups ng
@@ -82,7 +82,7 @@ func GetArticles(ctx context.Context, pool *pgxpool.Pool, groupID, userID string
 		           origin_node, origin_id,
 		           0 AS depth, id AS thread_root, created_at AS root_ts
 		    FROM articles
-		    WHERE newsgroup_id = $1 AND parent_id IS NULL AND NOT cancelled
+		    WHERE newsgroup_id = $1 AND parent_id IS NULL AND NOT cancelled AND approved
 
 		    UNION ALL
 
@@ -91,7 +91,7 @@ func GetArticles(ctx context.Context, pool *pgxpool.Pool, groupID, userID string
 		           t.depth + 1, t.thread_root, t.root_ts
 		    FROM articles a
 		    JOIN thread t ON t.id = a.parent_id
-		    WHERE NOT a.cancelled
+		    WHERE NOT a.cancelled AND a.approved
 		)
 		SELECT t.id, t.newsgroup_id, ng.name, t.author_id, COALESCE(u.username, t.remote_author, '?'),
 		       t.subject, t.body, t.parent_id, t.cancelled, t.created_at, t.depth,
@@ -150,13 +150,15 @@ func CountArticlesPostedSince(ctx context.Context, pool *pgxpool.Pool, authorID,
 	return n, err
 }
 
-func PostArticle(ctx context.Context, pool *pgxpool.Pool, groupID, authorID, subject, body string, parentID *string) (*Article, error) {
+// PostArticle stores a local article. approved=false parks it in the
+// moderation queue (posts by non-admins into moderated groups).
+func PostArticle(ctx context.Context, pool *pgxpool.Pool, groupID, authorID, subject, body string, parentID *string, approved bool) (*Article, error) {
 	a := &Article{}
 	err := pool.QueryRow(ctx, `
-		INSERT INTO articles (newsgroup_id, author_id, subject, body, parent_id)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO articles (newsgroup_id, author_id, subject, body, parent_id, approved)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, newsgroup_id, author_id, subject, body, parent_id, cancelled, created_at`,
-		groupID, authorID, subject, body, parentID,
+		groupID, authorID, subject, body, parentID, approved,
 	).Scan(&a.ID, &a.NewsgroupID, &a.AuthorID, &a.Subject, &a.Body, &a.ParentID, &a.Cancelled, &a.CreatedAt)
 	return a, err
 }
@@ -192,7 +194,7 @@ func MarkArticleRead(ctx context.Context, pool *pgxpool.Pool, articleID, userID 
 func MarkGroupRead(ctx context.Context, pool *pgxpool.Pool, groupID, userID string) error {
 	_, err := pool.Exec(ctx, `
 		INSERT INTO article_reads (user_id, article_id)
-		SELECT $1, id FROM articles WHERE newsgroup_id = $2 AND NOT cancelled
+		SELECT $1, id FROM articles WHERE newsgroup_id = $2 AND NOT cancelled AND approved
 		ON CONFLICT DO NOTHING`,
 		userID, groupID)
 	return err
@@ -202,7 +204,7 @@ func CountUnreadNews(ctx context.Context, pool *pgxpool.Pool, userID string) (in
 	var n int
 	err := pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM articles a
-		WHERE NOT a.cancelled
+		WHERE NOT a.cancelled AND a.approved
 		  AND NOT EXISTS (SELECT 1 FROM article_reads ar WHERE ar.article_id = a.id AND ar.user_id = $1)`,
 		userID).Scan(&n)
 	return n, err

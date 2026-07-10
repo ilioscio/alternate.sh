@@ -36,6 +36,8 @@ type User struct {
 	Email           string
 	CreatedAt       time.Time
 	LastLogin       *time.Time
+	Banned          bool
+	BanReason       string
 }
 
 type SSHKey struct {
@@ -58,7 +60,8 @@ type LoginRecord struct {
 const userColumns = `
 	id, username, display_name, password_hash, office, home_phone,
 	plan, project, signature, public_page, mesg_on, vacation,
-	vacation_message, hush_login, admin, calendar, biff, email, created_at, last_login`
+	vacation_message, hush_login, admin, calendar, biff, email, created_at, last_login,
+	banned, ban_reason`
 
 func scanUser(row pgx.Row) (*User, error) {
 	u := &User{}
@@ -67,6 +70,7 @@ func scanUser(row pgx.Row) (*User, error) {
 		&u.Office, &u.HomePhone, &u.Plan, &u.Project,
 		&u.Signature, &u.PublicPage, &u.MesgOn, &u.Vacation,
 		&u.VacationMessage, &u.HushLogin, &u.Admin, &u.Calendar, &u.Biff, &u.Email, &u.CreatedAt, &u.LastLogin,
+		&u.Banned, &u.BanReason,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -248,7 +252,8 @@ func SetMOTD(ctx context.Context, pool *pgxpool.Pool, body string) error {
 
 func GetRandomFortune(ctx context.Context, pool *pgxpool.Pool) (string, error) {
 	var body string
-	err := pool.QueryRow(ctx, `SELECT body FROM fortunes ORDER BY RANDOM() LIMIT 1`).Scan(&body)
+	err := pool.QueryRow(ctx,
+		`SELECT body FROM fortunes WHERE status = 'approved' ORDER BY RANDOM() LIMIT 1`).Scan(&body)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}

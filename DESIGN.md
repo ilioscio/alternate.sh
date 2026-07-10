@@ -217,7 +217,7 @@ Features:
 - Threaded conversations (In-Reply-To header, stored in DB)
 - `~/.signature` automatically appended
 - Cross-server mail via federation (see §8)
-- Mailing lists managed by admins (think early mailing list culture)
+- Mailing lists managed by admins (think early mailing list culture): `lists` shows every list and your memberships; `subscribe <list>` / `unsubscribe <list>` are self-service. Mailing to a list name fans the message out to every subscriber with a `[listname]` subject prefix. Lists are member-post by default; admins can flag a list announce-style (admin-only posting). List names live in the same namespace as usernames — no collisions. Local to each node.
 
 **`vacation`**
 Enables vacation auto-reply. Sets `~/.vacation.msg`. The system auto-replies once per sender per 7-day window with the message.
@@ -309,7 +309,7 @@ On the web frontend, public pages are also accessible via a URL: `https://hostna
 Re-display the message of the day.
 
 **`fortune`**
-Print a random quote from the system fortune database. Admins can submit fortunes. Community-contributed pool.
+Print a random quote from the system fortune database — a community-contributed pool. `fortune submit` offers a new one (rate-limited); submissions wait in a review queue where admins approve or reject them (`fortune review`), with the submitter notified either way. Only approved fortunes are ever served.
 
 **`calendar`**
 Read `~/.calendar` and show upcoming events. Format: `month/day description` per line. The system can optionally mail you reminders.
@@ -350,12 +350,13 @@ Cooperative/competitive terminal games running on the server, in the tradition o
 Only available to users with `admin: true`.
 
 **`wall <message>`** — broadcast to all users
-**`adduser <username>`** — provision a new account
-**`rmuser <username>`** — remove an account
 **`motd set`** — update the MOTD
-**`ban <username> [reason]`** — suspend an account
-**`news modpost`** — post to moderated newsgroups
+**`ban <username> [reason]`** / **`unban <username>`** — suspend / restore an account
+**`fortune review`** — approve or reject submitted fortunes
+**`news`** — admins additionally see the moderation queue for moderated groups
+**`audit [n]`** — recent admin actions
 **`node list`** — show known federated nodes and their status
+(Account provisioning lives in the CLI: `alternate-sh adduser`.)
 
 ---
 
@@ -571,9 +572,9 @@ The REPL provides zero access to the underlying OS. There is no `exec`, no files
 ### 10.5 Content & Moderation
 
 - Admins can cancel any news article
-- Admins can delete any mail on the server (with audit log)
-- Newsgroups can be set moderated (posts require admin approval)
-- Ban system: banned users can connect but see only a ban notice
+- Newsgroups can be set moderated: posts land in an **approval queue**, invisible until an admin approves (the author is notified either way); only approved articles federate
+- Ban system (`ban <user> [reason]` / `unban <user>`): banned users can connect but see only the ban notice — SSH sessions end after showing it, web logins are refused with it
+- Every admin moderation act — bans, article cancels, queue decisions, fortune reviews, MOTD changes, broadcasts — lands in an **audit log** (`audit` command, admin-only), so a multi-admin node can see who did what
 
 ---
 
@@ -769,8 +770,8 @@ Two small follow-ups before the games phase: an explicit call decline (`call -r 
 ### Phase 7 — Door Games ✅
 The games framework (§5.9) and its three launch tenants: chess (bespoke perft-proven engine, async + live play), Hunt the Wumpus (1973, faithfully), and the trade economy v1 (sectors, ports, daily turns — no combat yet). Node-local; per-game Postgres tables; lobby with presence and high scores.
 
-### Phase 7.1 — Community Polish ← NEXT
-Community fortune submission, mailing lists, and advanced moderation tools (approval queues for moderated groups, audit surfaces) — split out so the games get undivided attention.
+### Phase 7.1 — Community Polish ✅
+Community fortune submission with admin review, mailing lists (username-namespace, fan-out, announce-only flags), the moderation queue for moderated groups (pending articles invisible and unfederated until approved), the ban system on every login surface, and the admin audit log.
 
 ### Phase 8 — Inline Graphics & the Mobile Terminal
 Retire the call side panel: everything renders inside the terminal stream (§13). Server-side sixel for stills (SSH sixel terminals included, capability-negotiated), cell-anchored inline rendering for call video (keeping the Phase-6 codec), the 1-bit image ecosystem (client-dithered uploads, server-verified format, per-user quota; mail/news attachments, finger portraits, public page images), and a first-class mobile web experience (responsive, touch, soft key bar, PWA).

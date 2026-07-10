@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ilioscio/alternate.sh/internal/db"
 	"github.com/ilioscio/alternate.sh/internal/presence"
 )
 
@@ -44,6 +45,7 @@ func cmdWall(s *Session, args []string) error {
 		return nil
 	}
 	message = sanitizeMessage(message)
+	db.RecordAudit(s.ctx, s.db, s.User.ID, "wall", "", truncateStr(message, 80))
 
 	entries := s.hub.List()
 	sent := 0
@@ -87,39 +89,43 @@ func cmdHelp(s *Session, args []string) error {
 
 func helpForCommand(s *Session, cmd string) error {
 	help := map[string]string{
-		"finger":   "finger [user[@host]]   — show user info; @host queries a federated node",
-		"who":      "who                    — list logged-in users",
-		"rwho":     "rwho                   — list logged-in users across all federated nodes",
-		"w":        "w                      — list users with current activity",
-		"last":     "last [user]            — show login history",
-		"write":    "write <user> [msg]     — send a message to a logged-in user",
-		"talk":     "talk <user> [user...]  — split-screen live chat; each party runs 'talk <the others>'",
-		"call":     "call [-a|-r] <user[@host]> — live A/V call (web client); -a voice only; answer with 'call <caller>', decline with -r",
-		"mesg":     "mesg [y|n]             — enable/disable incoming messages",
-		"motd":     "motd [set]             — display the message of the day; 'set' edits it (admin)",
-		"msgs":     "msgs [-q]              — read system messages",
-		"fortune":  "fortune                — display a random fortune",
-		"plan":     "plan                   — edit your ~/.plan",
-		"project":  "project [text]         — set your current project",
-		"public":   "public [user]          — edit or read a public page",
-		"passwd":   "passwd                 — change your password",
-		"chfn":     "chfn                   — change finger information",
-		"mail":     "mail [user[@host]]     — read your mailbox, or send mail (cross-node mail is queued)",
-		"biff":     "biff [y|n]             — toggle new-mail notifications during your session",
-		"vacation": "vacation [on|off|msg]  — manage your vacation auto-reply",
-		"news":     "news                   — browse newsgroups and read articles",
-		"post":     "post [group]           — post an article to a newsgroup",
-		"calendar": "calendar [edit]        — show upcoming events, or edit your calendar",
-		"games":    "games                  — the arcade lobby: door games, players, high scores",
-		"chess":    "chess                  — full-rules chess; challenge anyone, play async or live",
-		"wumpus":   "wumpus                 — Hunt the Wumpus (1973): bats, pits, crooked arrows",
-		"trade":    "trade                  — haul cargo between the stars; daily turn budget",
-		"wall":     "wall [msg]             — broadcast to all users (admin only)",
-		"node":     "node [list|add|remove] — manage federation peers (admin only)",
-		"clear":    "clear                  — clear the screen",
-		"uptime":   "uptime                 — show server uptime and user count",
-		"logout":   "logout                 — end your session",
-		"help":     "help [cmd]             — show this help or help for a command",
+		"finger":    "finger [user[@host]]   — show user info; @host queries a federated node",
+		"who":       "who                    — list logged-in users",
+		"rwho":      "rwho                   — list logged-in users across all federated nodes",
+		"w":         "w                      — list users with current activity",
+		"last":      "last [user]            — show login history",
+		"write":     "write <user> [msg]     — send a message to a logged-in user",
+		"talk":      "talk <user> [user...]  — split-screen live chat; each party runs 'talk <the others>'",
+		"call":      "call [-a|-r] <user[@host]> — live A/V call (web client); -a voice only; answer with 'call <caller>', decline with -r",
+		"mesg":      "mesg [y|n]             — enable/disable incoming messages",
+		"motd":      "motd [set]             — display the message of the day; 'set' edits it (admin)",
+		"msgs":      "msgs [-q]              — read system messages",
+		"fortune":   "fortune [submit|review] — random fortune; submit your own (admins review the queue)",
+		"lists":     "lists [create|rm|flag] — mailing lists; mail a list's name to post to it",
+		"subscribe": "subscribe <list>      — join a mailing list ('unsubscribe' to leave)",
+		"ban":       "ban <user> [reason]    — suspend an account (admin; 'unban' restores)",
+		"audit":     "audit [n]              — recent admin actions (admin only)",
+		"plan":      "plan                   — edit your ~/.plan",
+		"project":   "project [text]         — set your current project",
+		"public":    "public [user]          — edit or read a public page",
+		"passwd":    "passwd                 — change your password",
+		"chfn":      "chfn                   — change finger information",
+		"mail":      "mail [user[@host]]     — read your mailbox, or send mail (cross-node mail is queued)",
+		"biff":      "biff [y|n]             — toggle new-mail notifications during your session",
+		"vacation":  "vacation [on|off|msg]  — manage your vacation auto-reply",
+		"news":      "news                   — browse newsgroups and read articles",
+		"post":      "post [group]           — post an article to a newsgroup",
+		"calendar":  "calendar [edit]        — show upcoming events, or edit your calendar",
+		"games":     "games                  — the arcade lobby: door games, players, high scores",
+		"chess":     "chess                  — full-rules chess; challenge anyone, play async or live",
+		"wumpus":    "wumpus                 — Hunt the Wumpus (1973): bats, pits, crooked arrows",
+		"trade":     "trade                  — haul cargo between the stars; daily turn budget",
+		"wall":      "wall [msg]             — broadcast to all users (admin only)",
+		"node":      "node [list|add|remove] — manage federation peers (admin only)",
+		"clear":     "clear                  — clear the screen",
+		"uptime":    "uptime                 — show server uptime and user count",
+		"logout":    "logout                 — end your session",
+		"help":      "help [cmd]             — show this help or help for a command",
 	}
 
 	// Resolve aliases so e.g. 'help rn' works.

@@ -434,5 +434,27 @@ pkgs.testers.runNixOSTest {
         nodeb.wait_until_succeeds(psql_check(
             "SELECT count(*) FROM articles WHERE subject='READD-SUBJ'", "1"
         ), timeout=30)
+
+    with subtest("unapproved articles do not federate until approved"):
+        # A pending (moderation-queue) article on nodea must be invisible to
+        # peers; approval bumps updated_at, so the next sync carries it.
+        psql(nodea,
+            "INSERT INTO articles (newsgroup_id, author_id, subject, body, approved)"
+            " SELECT ng.id, u.id, 'PENDING-FED-SUBJ', 'body', false"
+            " FROM newsgroups ng, users u WHERE ng.name='alt.chat' AND u.username='alice'")
+        nodeb.succeed("systemctl restart alternate-sh")
+        nodeb.wait_for_unit("alternate-sh.service")
+        nodeb.sleep(8)  # give the startup sync ample time to (not) deliver it
+        n = psql(nodeb, "SELECT count(*) FROM articles WHERE subject='PENDING-FED-SUBJ'")
+        assert n == "0", f"pending article federated ({n} rows)"
+
+        psql(nodea,
+            "UPDATE articles SET approved=true, updated_at=NOW()"
+            " WHERE subject='PENDING-FED-SUBJ'")
+        nodeb.succeed("systemctl restart alternate-sh")
+        nodeb.wait_for_unit("alternate-sh.service")
+        nodeb.wait_until_succeeds(psql_check(
+            "SELECT count(*) FROM articles WHERE subject='PENDING-FED-SUBJ'", "1"
+        ), timeout=60)
   '';
 }

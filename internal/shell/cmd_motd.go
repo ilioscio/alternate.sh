@@ -63,6 +63,7 @@ func motdSet(s *Session) error {
 		s.Println("error saving MOTD")
 		return nil
 	}
+	db.RecordAudit(s.ctx, s.db, s.User.ID, "motd.set", "", "")
 	s.Println("MOTD updated.")
 	return nil
 }

@@ -483,5 +483,111 @@ pkgs.testers.runNixOSTest {
     with subtest("games lobby shows the chess leaderboard"):
         out = sh("alice", "alicepass123", ["games"])
         expect(out, "bob (1 win)")
+
+    # ── Community polish (7.1) ────────────────────────────────────────────────
+    with subtest("fortune: submit, review, approve and reject"):
+        out = sh("bob", "bobpass12345", [
+            "fortune submit FORTUNE-KEEP-CANARY",
+            "fortune submit FORTUNE-DROP-CANARY",
+            "fortune review",
+        ])
+        expect(out,
+            "Fortune submitted for review.",
+            "fortune: review is admin-only",
+        )
+        out = sh("alice", "alicepass123", ["fortune review", "a", "r"])
+        expect(out, "FORTUNE-KEEP-CANARY", "Approved.", "Rejected.", "end of queue")
+        n = psql("SELECT count(*) FROM fortunes WHERE status='approved' AND body='FORTUNE-KEEP-CANARY'")
+        assert n == "1", f"approved fortune rows: {n}"
+        n = psql("SELECT count(*) FROM fortunes WHERE status='rejected'")
+        assert n == "1", f"rejected fortune rows: {n}"
+
+    with subtest("mailing lists: create, subscribe, fan-out, flags, guards"):
+        out = sh("alice", "alicepass123", [
+            "lists create bob take-a-username",   # collides with a user
+            "lists create crew The crew list",
+            "lists",
+        ])
+        expect(out, "is a user", "List crew created.", "crew")
+
+        out = sh("bob", "bobpass12345", [
+            "lists create nope x",     # non-admin
+            "subscribe crew",
+            "mail crew", "CREW-SUBJ", "CREW-BODY", ".", "y",
+        ])
+        expect(out,
+            "creating lists is admin-only",
+            "Subscribed to crew.",
+            "To: crew (1 subscriber)",
+            "sent to 1 member(s) of crew",
+        )
+        out = sh("bob", "bobpass12345", ["mail", "1", "q"])
+        expect(out, "[crew] CREW-SUBJ", "CREW-BODY")
+
+        # Announce-only: non-admin posting is refused; non-member too.
+        out = sh("alice", "alicepass123", ["lists flag crew admin-only"])
+        expect(out, "crew is now admin-only")
+        out = sh("bob", "bobpass12345", ["mail crew"])
+        expect(out, "announce-only")
+        out = sh("bob", "bobpass12345", ["unsubscribe crew"])
+        expect(out, "Unsubscribed from crew.")
+
+    with subtest("moderated group: queue, approve, reject"):
+        psql("UPDATE newsgroups SET moderated=true WHERE name='alt.chat'")
+        out = sh("bob", "bobpass12345", [
+            "post alt.chat", "MODQ-KEEP", "please approve", ".", "y",
+            "post alt.chat", "MODQ-DROP", "please reject", ".", "y",
+        ])
+        expect(out, "submitted for moderator review")
+        # Invisible while pending.
+        out = sh("bob", "bobpass12345", ["news", "alt.chat", "q", "q"])
+        assert "MODQ-KEEP" not in out, "pending article visible to readers"
+
+        out = sh("alice", "alicepass123", ["news", "mq", "a", "r", "q"])
+        expect(out,
+            "awaiting moderation",
+            "MODQ-KEEP", "Approved into alt.chat.",
+            "MODQ-DROP", "Rejected.",
+        )
+        out = sh("bob", "bobpass12345", ["news", "alt.chat", "1", "x", "q", "q"])
+        expect(out, "MODQ-KEEP")
+        assert "MODQ-DROP" not in out, "rejected article visible"
+        psql("UPDATE newsgroups SET moderated=false WHERE name='alt.chat'")
+
+    with subtest("ban and unban gate every login surface"):
+        out = sh("alice", "alicepass123", ["ban alice"])
+        expect(out, "you can't ban yourself")
+        out = sh("alice", "alicepass123", ["ban carol BAN-REASON-CANARY"])
+        expect(out, "carol is banned")
+
+        # SSH shows the notice and no prompt.
+        _, ssh_out = machine.execute(
+            "echo | " + SSH.format(user="carol", pw="carolnewpass1"), timeout=30
+        )
+        assert "suspended" in ssh_out and "BAN-REASON-CANARY" in ssh_out, ssh_out
+        assert "carol@" not in ssh_out, "banned user reached a prompt"
+
+        # Web login is refused with the reason.
+        web = machine.succeed(
+            "curl -s -X POST http://127.0.0.1:8080/api/login"
+            " -H 'Content-Type: application/json'"
+            " -d '{\"username\":\"carol\",\"password\":\"carolnewpass1\"}'"
+        )
+        assert "suspended" in web and "BAN-REASON-CANARY" in web, web
+
+        out = sh("alice", "alicepass123", ["unban carol"])
+        expect(out, "carol may log in again")
+        out = sh("carol", "carolnewpass1", ["uptime"])
+        expect(out, "carol@testnode")
+
+    with subtest("audit log records moderation acts"):
+        out = sh("alice", "alicepass123", ["audit"])
+        expect(out,
+            "ban", "unban", "carol",
+            "article.approve", "article.reject",
+            "fortune.approve", "list.create",
+        )
+        out = sh("bob", "bobpass12345", ["audit"])
+        expect(out, "audit: permission denied")
   '';
 }
